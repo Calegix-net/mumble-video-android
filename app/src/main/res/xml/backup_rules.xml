@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 10 and 11; data_extraction_rules.xml covers 12 and up. -->
+<full-backup-content>
+    <exclude domain="file" path="certificates/" />
+</full-backup-content>

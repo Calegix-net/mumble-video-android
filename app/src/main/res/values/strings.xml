@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mumble Video</string>
+    <string name="channel_connection">Connection</string>
+    <string name="channel_connection_description">Shows while connected to a server</string>
+    <string name="channel_messages">Messages</string>
+    <string name="channel_messages_description">Chat and private messages</string>
+</resources>

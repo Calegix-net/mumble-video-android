@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <!-- Client certificates are identities; they must not leave the device without an explicit export. -->
+    <cloud-backup>
+        <exclude domain="file" path="certificates/" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="certificates/" />
+    </device-transfer>
+</data-extraction-rules>
