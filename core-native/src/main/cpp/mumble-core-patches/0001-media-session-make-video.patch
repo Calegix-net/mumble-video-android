@@ -1,0 +1,61 @@
+diff -ruN a/src/mumble-core/MumbleCore.cpp b/src/mumble-core/MumbleCore.cpp
+--- a/src/mumble-core/MumbleCore.cpp
++++ b/src/mumble-core/MumbleCore.cpp
+@@ -105,6 +105,7 @@
+ 	CryptoSession crypto;
+ 	MediaDemux demux{ MediaDemux::Framing::ChannelByte };
+ 	VideoReceiver videoReceiver;
++	VideoFragmenter videoFragmenter;
+ 	// Separate decoders for the two arrival paths, as on the desktop: a host may well read UDP and TCP on
+ 	// different threads, even if it then serialises its calls here.
+ 	UDPDecoder< Role::Client > udpDecoder{ PROTOBUF_INTRODUCTION_VERSION };
+@@ -272,6 +273,33 @@
+ 	return m_impl->encryptAudioChannel(m_impl->audioEncoder.encodeAudioPacket(audio));
+ }
+ 
++std::vector< Bytes > MediaSession::makeVideo(const MumbleCore::VideoUnit &unit) {
++	VideoUnitHeader header;
++	header.streamID             = unit.streamID;
++	header.frameNumber          = unit.frameNumber;
++	header.unitID               = unit.unitID;
++	header.isKeyframe           = unit.isKeyframe;
++	header.isFrameEnd           = unit.isFrameEnd;
++	header.captureTimestampUsec = unit.captureTimestampUsec;
++	header.x                    = unit.x;
++	header.y                    = unit.y;
++	header.width                = unit.width;
++	header.height               = unit.height;
++
++	std::vector< Bytes > datagrams;
++	if (!m_impl->crypto.video().isValid() || !m_impl->videoFragmenter.fragment(header, unit.payload)) {
++		return datagrams;
++	}
++	for (const std::vector< byte > &packet : m_impl->videoFragmenter.packets()) {
++		Bytes datagram;
++		if (!m_impl->crypto.video().encrypt(packet, datagram)) {
++			return {};
++		}
++		datagrams.push_back(std::move(datagram));
++	}
++	return datagrams;
++}
++
+ void MediaSession::removeSender(std::uint32_t senderSession) {
+ 	m_impl->videoReceiver.removeSender(senderSession);
+ }
+diff -ruN a/src/mumble-core/include/mumble-core/MumbleCore.h b/src/mumble-core/include/mumble-core/MumbleCore.h
+--- a/src/mumble-core/include/mumble-core/MumbleCore.h
++++ b/src/mumble-core/include/mumble-core/MumbleCore.h
+@@ -213,6 +213,12 @@
+ 	std::optional< Bytes > makeAudio(ByteView opusFrame, std::uint64_t frameNumber, std::uint32_t target,
+ 									 bool isLastFrame);
+ 
++	/// Fragments and encrypts one coded unit of our own video stream into datagrams for sendto(). It uses
++	/// the same video crypt state the session already uses for retransmission requests, so there is one
++	/// sequence (nonce) space per connection and no nonce is ever reused. senderSession is ignored (the
++	/// server stamps it). Empty if not keyed, or if the unit is larger than one unit may be.
++	std::vector< Bytes > makeVideo(const VideoUnit &unit);
++
+ 	/// Forgets what is held for a user (their partial video units), when they leave or stop sending.
+ 	void removeSender(std::uint32_t senderSession);
+ 

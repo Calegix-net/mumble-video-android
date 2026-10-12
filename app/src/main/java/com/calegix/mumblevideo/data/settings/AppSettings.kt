@@ -67,6 +67,8 @@ data class AppSettings(
 
     // Video
     val cameraFacing: CameraFacing = CameraFacing.Front,
+    /** A specific camera from the picker; null means the first one facing [cameraFacing]. */
+    val cameraId: String? = null,
     val cameraResolution: VideoResolution = VideoResolution.P720,
     val cameraFramerate: Int = 30,
     val screenResolution: VideoResolution = VideoResolution.P1080,

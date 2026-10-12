@@ -74,7 +74,9 @@ fun FullscreenVideoScreen(
             },
         contentAlignment = Alignment.Center,
     ) {
-        val aspect = tile?.stream?.let { it.width.toFloat() / it.height.coerceAtLeast(1) } ?: (16f / 9f)
+        // Some senders announce 0x0 (the size is in the bitstream); a zero aspect ratio would crash layout.
+        val aspect =
+            tile?.stream?.takeIf { it.width > 0 && it.height > 0 }?.let { it.width.toFloat() / it.height } ?: (16f / 9f)
         VideoSurface(
             stream,
             viewModel::attachSurface,

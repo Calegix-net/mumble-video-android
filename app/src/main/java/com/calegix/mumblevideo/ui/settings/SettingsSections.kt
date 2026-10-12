@@ -380,16 +380,33 @@ fun VideoSettings(
             summary = "Nothing plays until tapped, and thumbnails ask senders for low bitrate",
         )
         PreferenceCategory("Camera")
-        ListPreference(
-            "Camera",
-            listOf(
-                CameraFacing.Front to "Front",
-                CameraFacing.Back to "Back",
-                CameraFacing.External to "External (USB)",
-            ),
-            s.cameraFacing,
-            { v -> viewModel.update { it.copy(cameraFacing = v) } },
-        )
+        val cameras by viewModel.cameras.collectAsStateWithLifecycle()
+        if (cameras.isEmpty()) {
+            ListPreference(
+                "Camera",
+                listOf(
+                    CameraFacing.Front to "Front",
+                    CameraFacing.Back to "Back",
+                    CameraFacing.External to "External (USB)",
+                ),
+                s.cameraFacing,
+                { v -> viewModel.update { it.copy(cameraFacing = v, cameraId = null) } },
+            )
+        } else {
+            val selected = s.cameraId?.takeIf { id -> cameras.any { it.id == id } }
+                ?: cameras.firstOrNull { it.facing == s.cameraFacing }?.id
+                ?: cameras.first().id
+            ListPreference(
+                "Camera",
+                cameras.map { it.id to it.name },
+                selected,
+                { id ->
+                    val camera = cameras.first { it.id == id }
+                    viewModel.update { it.copy(cameraId = id, cameraFacing = camera.facing) }
+                },
+                summary = "Also switchable from the Video tab while sharing",
+            )
+        }
         ListPreference("Resolution", resolutions, s.cameraResolution, { v ->
             viewModel.update { it.copy(cameraResolution = v) }
         })

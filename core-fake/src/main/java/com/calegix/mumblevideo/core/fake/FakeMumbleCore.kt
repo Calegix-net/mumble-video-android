@@ -3,6 +3,8 @@ package com.calegix.mumblevideo.core.fake
 import android.view.Surface
 import com.calegix.mumblevideo.core.AudioConfig
 import com.calegix.mumblevideo.core.AudioLevel
+import com.calegix.mumblevideo.core.CameraFacing
+import com.calegix.mumblevideo.core.CameraOption
 import com.calegix.mumblevideo.core.CameraRequest
 import com.calegix.mumblevideo.core.CertificateInfo
 import com.calegix.mumblevideo.core.ChannelId
@@ -547,6 +549,11 @@ class FakeMumbleCore(
             request.codec,
         ) { copy(camera = it) }
     }
+
+    override suspend fun availableCameras(): List<CameraOption> = listOf(
+        CameraOption("fake-front", CameraFacing.Front, "Front camera (simulated)", listOf(1280 to 720, 640 to 480), 30),
+        CameraOption("fake-back", CameraFacing.Back, "Back camera (simulated)", listOf(1920 to 1080, 1280 to 720), 30),
+    )
 
     override suspend fun stopCamera() = stopLocal(_localVideo.value.camera) { copy(camera = null) }
 

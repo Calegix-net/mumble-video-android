@@ -16,5 +16,11 @@ mkdir -p "$dst"
 git -C "$core" archive --format=tar "$rev" src/mumble-core 3rdparty/arc4random | tar -xf - -C "$dst"
 # Not needed in the app: the device test (it wants nlohmann_json) and the standalone build scripts.
 rm -rf "$dst/src/mumble-core/tests" "$dst/src/mumble-core/android"
+# Local changes not yet in the core, kept as patches so a re-sync keeps them (see the patch headers).
+for patch in "$here"/core-native/src/main/cpp/mumble-core-patches/*.patch; do
+    [ -e "$patch" ] || continue
+    git -C "$here" apply -p1 --directory=core-native/src/main/cpp/mumble-core "$patch"
+    echo "applied $(basename "$patch")"
+done
 printf "%s %s\n" "$rev" "$ref" > "$dst/CORE_REVISION"
 echo "vendored mumble-core $rev ($ref)"

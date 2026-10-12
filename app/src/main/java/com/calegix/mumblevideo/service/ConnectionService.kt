@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -21,6 +22,9 @@ import com.calegix.mumblevideo.core.VoiceState
 import com.calegix.mumblevideo.session.SessionController
 import com.calegix.mumblevideo.ui.MainActivity
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -69,6 +73,13 @@ class ConnectionService : LifecycleService() {
 
     private fun observe() {
         lifecycleScope.launch {
+            session.core.localVideo.map { it.camera != null }.distinctUntilChanged().drop(1).collect { camera ->
+                runCatching {
+                    goForeground(build(session.core.connectionState.value, session.core.voiceState.value), camera)
+                }.onFailure { Log.w("MvService", "could not change foreground type", it) }
+            }
+        }
+        lifecycleScope.launch {
             combine(session.core.connectionState, session.core.voiceState, session.core.serverState) {
                     state,
                     voice,
@@ -88,8 +99,15 @@ class ConnectionService : LifecycleService() {
         }
     }
 
-    private fun goForeground(notification: Notification) {
+    private fun goForeground(notification: Notification, camera: Boolean = false) {
         var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+        // While the camera is shared, so it keeps running with the screen off or the app in the
+        // background (Android 11+ stops camera access in background services without this type).
+        if (camera &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+        ) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        }
         // The microphone type exists from 11 and is only allowed once the permission is granted
         // (enforced from 14). On 10, a media-playback service may record anyway.
         val micGranted =

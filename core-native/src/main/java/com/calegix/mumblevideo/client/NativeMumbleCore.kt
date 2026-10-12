@@ -12,6 +12,7 @@ import com.calegix.mumblevideo.client.audio.AudioCapture
 import com.calegix.mumblevideo.client.audio.AudioPlayback
 import com.calegix.mumblevideo.client.audio.AudioRouting
 import com.calegix.mumblevideo.client.crypto.OcbCrypt
+import com.calegix.mumblevideo.client.media.CameraStreamer
 import com.calegix.mumblevideo.client.media.FrameCounter
 import com.calegix.mumblevideo.client.media.MediaEvents
 import com.calegix.mumblevideo.client.media.MumbleCoreMedia
@@ -26,6 +27,7 @@ import com.calegix.mumblevideo.client.net.UdpChannel
 import com.calegix.mumblevideo.client.state.SessionReducer
 import com.calegix.mumblevideo.core.AudioConfig
 import com.calegix.mumblevideo.core.AudioLevel
+import com.calegix.mumblevideo.core.CameraOption
 import com.calegix.mumblevideo.core.CameraRequest
 import com.calegix.mumblevideo.core.CertificateInfo
 import com.calegix.mumblevideo.core.ChannelId
@@ -36,6 +38,7 @@ import com.calegix.mumblevideo.core.ConnectRequest
 import com.calegix.mumblevideo.core.ConnectionState
 import com.calegix.mumblevideo.core.CoreEvent
 import com.calegix.mumblevideo.core.DisconnectReason
+import com.calegix.mumblevideo.core.LocalStream
 import com.calegix.mumblevideo.core.LocalVideoState
 import com.calegix.mumblevideo.core.MessageTarget
 import com.calegix.mumblevideo.core.MumbleCore
@@ -52,6 +55,7 @@ import com.calegix.mumblevideo.core.TalkState
 import com.calegix.mumblevideo.core.UserBlob
 import com.calegix.mumblevideo.core.UserSession
 import com.calegix.mumblevideo.core.VideoCodec
+import com.calegix.mumblevideo.core.VideoSourceKind
 import com.calegix.mumblevideo.core.VideoStream
 import com.calegix.mumblevideo.core.VoiceInputMode
 import com.calegix.mumblevideo.core.VoiceState
@@ -132,7 +136,8 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
     override val videoStreams: StateFlow<List<VideoStream>> = _videoStreams.asStateFlow()
 
     override val watchers: StateFlow<Map<StreamKey, Set<UserSession>>> = MutableStateFlow(emptyMap())
-    override val localVideo: StateFlow<LocalVideoState> = MutableStateFlow(LocalVideoState())
+    private val _localVideo = MutableStateFlow(LocalVideoState())
+    override val localVideo: StateFlow<LocalVideoState> = _localVideo.asStateFlow()
 
     private val _messages =
         MutableSharedFlow<ChatMessage>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
@@ -905,6 +910,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         }
 
         private fun stopMedia() {
+            stopCamera(announce = false)
             decoders.keys.toList().forEach(::closeDecoder)
             synchronized(media) { media.close() }
             micRelease?.cancel()
@@ -961,6 +967,10 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
 
         fun setSurface(key: StreamKey, surface: Surface?) {
             if (surface == null) surfaces.remove(key) else surfaces[key] = surface
+            if (key == cameraKey) {
+                camera?.setPreview(surface)
+                return
+            }
             decoders[key]?.setSurface(surface)
         }
 
@@ -994,7 +1004,11 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         /** The server echoes every subscribe; subscribe=false in the echo means it was refused. */
         private fun handleSubscribeEcho(echo: MumbleProto.VideoSubscribe) {
             val key = StreamKey(UserSession(echo.session), echo.streamId)
-            if (key.session == self) return // a viewer asking us for a keyframe; we don't send video yet
+            if (key.session == self) {
+                // A viewer asking for a keyframe of one of our streams (relayed by the server).
+                if (echo.requestKeyframe && key == cameraKey) camera?.requestKeyframe()
+                return
+            }
             if (!echo.subscribe && decoders.containsKey(key)) {
                 closeDecoder(key)
                 setSubscription(key, Subscription.Failed("You don't have permission to watch this stream"))
@@ -1010,6 +1024,130 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             _videoStreams.update { streams ->
                 streams.map { if (it.key == key) it.copy(subscription = subscription) else it }
             }
+        }
+
+        // --- sending video (camera) ---------------------------------------------------------------
+
+        private var nextStreamId = 0
+
+        @Volatile private var camera: CameraStreamer? = null
+
+        @Volatile private var cameraKey: StreamKey? = null
+
+        fun startCamera(request: CameraRequest, option: CameraOption) {
+            val me = self ?: throw MumbleCoreException(Kind.NotConnected, "Not synchronised yet")
+            stopCamera()
+            val streamId = nextStreamId++
+            val key = StreamKey(me, streamId)
+            val (width, height) = request.width to request.height
+            val codec = request.codec ?: VideoCodec.VP8
+            val streamer = CameraStreamer(
+                context = context,
+                config = CameraStreamer.Config(
+                    cameraId = option.id,
+                    width = width,
+                    height = height,
+                    framerate = request.framerate,
+                    bitrate = sendBitrate(request, width, height),
+                    codec = codec,
+                ),
+                onFrame = { frame -> sendVideoFrame(streamId, frame) },
+                onError = { reason ->
+                    Log.w(TAG, "camera stopped: $reason")
+                    scope.launch(Dispatchers.Default) { stopCamera() }
+                    _events.tryEmit(CoreEvent.PermissionDenied("Camera stopped: $reason"))
+                },
+            )
+            try {
+                streamer.start()
+            } catch (e: IllegalStateException) {
+                streamer.close()
+                throw MumbleCoreException(Kind.NotSupported, e.message ?: "The camera could not be started", e)
+            }
+            camera = streamer
+            cameraKey = key
+            surfaces[key]?.let(streamer::setPreview)
+            val sent = streamer.outputWidth to streamer.outputHeight
+            send(
+                ControlType.VIDEO_STATE,
+                MumbleProto.VideoState.newBuilder()
+                    .setStreamId(streamId)
+                    .setActive(true)
+                    .setCodec(protoCodec(codec))
+                    .setSourceKind(MumbleProto.VideoState.SourceKind.Camera)
+                    .setSourceName(option.name)
+                    .setWidth(sent.first)
+                    .setHeight(sent.second)
+                    .setMaxFramerate(request.framerate)
+                    .setTargetBandwidth(streamer.config.bitrate)
+                    .build(),
+            )
+            _localVideo.update { it.copy(camera = LocalStream(key, sent.first, sent.second, request.framerate, codec)) }
+            _videoStreams.update { streams ->
+                streams.filterNot { it.key == key } + VideoStream(
+                    key = key,
+                    codec = codec,
+                    sourceKind = VideoSourceKind.Camera,
+                    sourceName = option.name,
+                    width = sent.first,
+                    height = sent.second,
+                    maxFramerate = request.framerate,
+                    targetBandwidth = streamer.config.bitrate,
+                    subscription = Subscription.Active(sent.first, sent.second, request.framerate.toFloat(), 0),
+                    isLocal = true,
+                )
+            }
+            Log.i(TAG, "camera ${option.name} sending ${sent.first}x${sent.second}@${request.framerate} $codec as $key")
+        }
+
+        fun stopCamera(announce: Boolean = true) {
+            val streamer = camera ?: return
+            val key = cameraKey
+            camera = null
+            cameraKey = null
+            streamer.close()
+            if (key != null) {
+                if (announce) {
+                    send(
+                        ControlType.VIDEO_STATE,
+                        MumbleProto.VideoState.newBuilder().setStreamId(key.streamId).setActive(false).build(),
+                    )
+                }
+                _videoStreams.update { streams -> streams.filterNot { it.key == key } }
+            }
+            _localVideo.update { it.copy(camera = null) }
+        }
+
+        private fun sendVideoFrame(streamId: Int, frame: CameraStreamer.EncodedFrame) {
+            // As on the desktop: with UDP down, video would only crowd out the tunnelled voice.
+            val u = udp ?: return
+            if (!udpVerified || request.forceTcp) return
+            val datagrams = synchronized(media) {
+                media.makeVideo(
+                    streamId = streamId,
+                    frameNumber = frame.frameNumber,
+                    isKeyframe = frame.isKeyframe,
+                    captureTimestampUsec = frame.captureTimestampUsec,
+                    width = frame.width,
+                    height = frame.height,
+                    payload = frame.data,
+                )
+            }
+            datagrams.forEach(u::sendRaw)
+        }
+
+        /** What to ask the encoder for: the request's cap, else by size, within the server's limit. */
+        private fun sendBitrate(request: CameraRequest, width: Int, height: Int): Int {
+            val bySize = when {
+                width * height >= 1920 * 1080 -> 3_000_000
+                width * height >= 1280 * 720 -> 1_500_000
+                width * height >= 854 * 480 -> 800_000
+                else -> 450_000
+            }
+            var bitrate = if (request.maxBandwidth > 0) minOf(request.maxBandwidth, bySize) else bySize
+            val serverCap = _capabilities.value.maxVideoBandwidth
+            if (serverCap > 0) bitrate = minOf(bitrate, serverCap)
+            return bitrate
         }
 
         suspend fun requestComment(session: UserSession): String? {
@@ -1220,10 +1358,33 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         }
     }
 
-    override suspend fun startCamera(request: CameraRequest): Unit =
-        throw MumbleCoreException(Kind.NotSupported, "Sending video isn't available in this build yet")
+    override suspend fun availableCameras(): List<CameraOption> = withContext(Dispatchers.Default) {
+        CameraStreamer.cameras(context).map { CameraOption(it.id, it.facing, it.name, it.sizes, it.maxFramerate) }
+    }
 
-    override suspend fun stopCamera() = Unit
+    override suspend fun startCamera(request: CameraRequest) {
+        val l = requireLink()
+        if (!_capabilities.value.video) {
+            throw MumbleCoreException(
+                Kind.NotSupported,
+                "This server does not support video",
+            )
+        }
+        if (context.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            throw MumbleCoreException(Kind.PermissionDenied, "Camera permission not granted")
+        }
+        val cameras = availableCameras()
+        val option = cameras.firstOrNull { it.id == request.cameraId }
+            ?: cameras.firstOrNull { it.facing == request.facing }
+            ?: cameras.firstOrNull()
+            ?: throw MumbleCoreException(Kind.NotSupported, "This device has no camera")
+        withContext(Dispatchers.Default) { l.startCamera(request, option) }
+    }
+
+    override suspend fun stopCamera() {
+        val l = link ?: return
+        withContext(Dispatchers.Default) { l.stopCamera() }
+    }
 
     override suspend fun startScreenShare(request: ScreenShareRequest): Unit =
         throw MumbleCoreException(Kind.NotSupported, "Screen sharing isn't available in this build yet")
@@ -1281,6 +1442,14 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             v.hasVersionV1() -> "${v.versionV1 ushr 16}.${(v.versionV1 ushr 8) and 0xFF}.${v.versionV1 and 0xFF}"
 
             else -> ""
+        }
+
+        fun protoCodec(codec: VideoCodec): MumbleProto.VideoState.Codec = when (codec) {
+            VideoCodec.TiledImage -> MumbleProto.VideoState.Codec.TiledImage
+            VideoCodec.VP8 -> MumbleProto.VideoState.Codec.VP8
+            VideoCodec.VP9 -> MumbleProto.VideoState.Codec.VP9
+            VideoCodec.AV1 -> MumbleProto.VideoState.Codec.AV1
+            VideoCodec.H264 -> MumbleProto.VideoState.Codec.H264
         }
 
         fun rejectReason(type: MumbleProto.Reject.RejectType): RejectReason = when (type) {

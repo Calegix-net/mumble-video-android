@@ -58,6 +58,29 @@ class MumbleCoreMedia : AutoCloseable {
     fun makeAudio(opus: ByteArray, frameNumber: Long, target: Int, isLastFrame: Boolean): ByteArray? =
         nativeMakeAudio(live(), opus, opus.size, frameNumber, target, isLastFrame)
 
+    /**
+     * One coded unit of our own video stream, fragmented and encrypted into datagrams ready to send
+     * as they are. Shares the session's video sequence space with its retransmission requests.
+     * Empty if the session is not keyed or the unit is too large.
+     */
+    @Synchronized
+    fun makeVideo(
+        streamId: Int,
+        frameNumber: Long,
+        isKeyframe: Boolean,
+        captureTimestampUsec: Long,
+        width: Int,
+        height: Int,
+        payload: ByteArray,
+        unitId: Int = 0,
+        isFrameEnd: Boolean = true,
+        x: Int = 0,
+        y: Int = 0,
+    ): List<ByteArray> = nativeMakeVideo(
+        live(), streamId, frameNumber, unitId, isKeyframe, isFrameEnd, captureTimestampUsec,
+        x, y, width, height, payload, payload.size,
+    )?.toList().orEmpty()
+
     /** Forgets a user's partial video units, when they leave or stop sending. */
     @Synchronized
     fun removeSender(session: Int) = nativeRemoveSender(live(), session)
@@ -108,6 +131,22 @@ class MumbleCoreMedia : AutoCloseable {
         private external fun nativeReceiveTunnelled(handle: Long, payload: ByteArray, length: Int): ByteArray?
 
         @JvmStatic private external fun nativeMakePing(handle: Long, timestamp: Long): ByteArray?
+
+        @JvmStatic private external fun nativeMakeVideo(
+            handle: Long,
+            streamId: Int,
+            frameNumber: Long,
+            unitId: Int,
+            isKeyframe: Boolean,
+            isFrameEnd: Boolean,
+            captureUsec: Long,
+            x: Int,
+            y: Int,
+            width: Int,
+            height: Int,
+            payload: ByteArray,
+            length: Int,
+        ): Array<ByteArray>?
 
         @JvmStatic private external fun nativeMakeAudio(
             handle: Long,

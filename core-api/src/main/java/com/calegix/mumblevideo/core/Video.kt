@@ -79,6 +79,18 @@ data class LocalVideoState(
 
 data class LocalStream(val key: StreamKey, val width: Int, val height: Int, val framerate: Int, val codec: VideoCodec)
 
+/** A camera the device offers, for the camera picker. */
+data class CameraOption(
+    /** Platform camera id, passed back as [CameraRequest.cameraId]. */
+    val id: String,
+    val facing: CameraFacing,
+    /** Human-readable, e.g. "Front camera" or "Back camera (wide)". */
+    val name: String,
+    /** Supported capture sizes, largest first. */
+    val sizes: List<Pair<Int, Int>>,
+    val maxFramerate: Int,
+)
+
 /** Which camera to use. The core maps this onto the platform's camera ids. */
 enum class CameraFacing { Front, Back, External }
 

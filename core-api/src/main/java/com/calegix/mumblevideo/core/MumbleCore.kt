@@ -210,8 +210,13 @@ interface MumbleCore : AutoCloseable {
     /** State of this client's own camera and screen-share outputs. */
     val localVideo: StateFlow<LocalVideoState>
 
+    /** The cameras this device has, for the picker. Works while disconnected. */
+    suspend fun availableCameras(): List<CameraOption>
+
     /**
-     * Starts sending the camera. Throws [MumbleCoreException] with
+     * Starts sending the camera. Attach a surface to the returned stream's key with
+     * [setVideoSurface] to show a local preview; stopping and starting again picks up a different
+     * [CameraRequest.cameraId], which is how switching cameras works. Throws [MumbleCoreException] with
      * [MumbleCoreException.Kind.NotSupported] if the server did not advertise video.
      */
     suspend fun startCamera(request: CameraRequest)

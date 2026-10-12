@@ -1,5 +1,9 @@
 package com.calegix.mumblevideo.ui.video
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,11 +28,13 @@ import androidx.compose.material.icons.automirrored.outlined.ScreenShare
 import androidx.compose.material.icons.automirrored.outlined.StopScreenShare
 import androidx.compose.material.icons.automirrored.outlined.VolumeOff
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.Cameraswitch
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.VideocamOff
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
@@ -46,11 +52,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.calegix.mumblevideo.core.StreamKey
@@ -105,6 +113,7 @@ fun VideoPane(
                     OwnVideoControls(
                         state,
                         onToggleCamera = viewModel::toggleCamera,
+                        onSwitchCamera = viewModel::switchCamera,
                         onToggleScreen = viewModel::toggleScreenShare,
                     )
                 }
@@ -132,55 +141,47 @@ fun VideoPane(
 }
 
 @Composable
-private fun OwnVideoControls(state: VideoUiState, onToggleCamera: () -> Unit, onToggleScreen: () -> Unit) {
+private fun OwnVideoControls(
+    state: VideoUiState,
+    onToggleCamera: () -> Unit,
+    onSwitchCamera: () -> Unit,
+    onToggleScreen: () -> Unit,
+) {
+    val cameraOn = state.local.camera != null
+    val sharing = state.local.screen != null
+    // Ask for the camera at the moment it is wanted; starting without it would only fail.
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) onToggleCamera()
+    }
+    val context = LocalContext.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = onToggleCamera) {
-                Icon(
-                    if (state.local.camera !=
-                        null
-                    ) {
-                        Icons.Outlined.VideocamOff
-                    } else {
-                        Icons.Outlined.Videocam
-                    },
-                    contentDescription = null,
-                )
-                Text(
-                    if (state.local.camera !=
-                        null
-                    ) {
-                        "Stop camera"
-                    } else {
-                        "Start camera"
-                    },
-                    modifier = Modifier.padding(start = 8.dp),
-                )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilledTonalButton(
+                onClick = {
+                    val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                        PackageManager.PERMISSION_GRANTED
+                    if (cameraOn || granted) onToggleCamera() else permission.launch(Manifest.permission.CAMERA)
+                },
+            ) {
+                Icon(if (cameraOn) Icons.Outlined.VideocamOff else Icons.Outlined.Videocam, contentDescription = null)
+                Text(if (cameraOn) "Stop camera" else "Start camera", modifier = Modifier.padding(start = 8.dp))
+            }
+            FilledTonalIconButton(onClick = onSwitchCamera) {
+                Icon(Icons.Outlined.Cameraswitch, contentDescription = "Switch camera")
             }
             FilledTonalButton(onClick = onToggleScreen) {
                 Icon(
-                    if (state.local.screen !=
-                        null
-                    ) {
+                    if (sharing) {
                         Icons.AutoMirrored.Outlined.StopScreenShare
                     } else {
                         Icons.AutoMirrored.Outlined.ScreenShare
                     },
                     contentDescription = null,
                 )
-                Text(
-                    if (state.local.screen !=
-                        null
-                    ) {
-                        "Stop sharing"
-                    } else {
-                        "Share screen"
-                    },
-                    modifier = Modifier.padding(start = 8.dp),
-                )
+                Text(if (sharing) "Stop sharing" else "Share screen", modifier = Modifier.padding(start = 8.dp))
             }
         }
-        if (state.local.camera != null || state.local.screen != null) {
+        if (cameraOn || sharing) {
             WatchingList(state.watchers)
         }
     }

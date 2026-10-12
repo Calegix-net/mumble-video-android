@@ -108,20 +108,36 @@ class VideoViewModel(
     }
 
     fun toggleCamera() = command {
+        if (core.localVideo.value.camera != null) core.stopCamera() else startCamera(settings.settings.value.cameraId)
+    }
+
+    /** Moves to the next camera the device has (front, back, external...), and remembers it. */
+    fun switchCamera() = command {
+        val cameras = core.availableCameras()
+        if (cameras.size < 2) return@command
+        val current =
+            settings.settings.value.cameraId
+                ?: cameras.firstOrNull { it.facing == settings.settings.value.cameraFacing }?.id
+        val next = cameras[(cameras.indexOfFirst { it.id == current } + 1).mod(cameras.size)]
+        settings.update { it.copy(cameraId = next.id, cameraFacing = next.facing) }
         if (core.localVideo.value.camera != null) {
             core.stopCamera()
-        } else {
-            val prefs = settings.settings.value
-            core.startCamera(
-                CameraRequest(
-                    facing = prefs.cameraFacing,
-                    width = prefs.cameraResolution.width,
-                    height = prefs.cameraResolution.height,
-                    framerate = prefs.cameraFramerate,
-                    codec = prefs.codecPreference,
-                ),
-            )
+            startCamera(next.id)
         }
+    }
+
+    private suspend fun startCamera(cameraId: String?) {
+        val prefs = settings.settings.value
+        core.startCamera(
+            CameraRequest(
+                facing = prefs.cameraFacing,
+                cameraId = cameraId,
+                width = prefs.cameraResolution.width,
+                height = prefs.cameraResolution.height,
+                framerate = prefs.cameraFramerate,
+                codec = prefs.codecPreference,
+            ),
+        )
     }
 
     fun toggleScreenShare() = command {

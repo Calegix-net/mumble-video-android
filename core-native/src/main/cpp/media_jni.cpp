@@ -221,6 +221,39 @@ JNIEXPORT jbyteArray JNICALL FN(nativeMakeAudio)(JNIEnv *env, jclass, jlong hand
 	return datagram ? toJava(env, *datagram) : nullptr;
 }
 
+// One coded unit of our own stream -> its encrypted datagrams, as byte[][] (empty if not keyed or too big).
+JNIEXPORT jobjectArray JNICALL FN(nativeMakeVideo)(JNIEnv *env, jclass, jlong handle, jint streamId, jlong frameNumber,
+                                                   jint unitId, jboolean isKeyframe, jboolean isFrameEnd,
+                                                   jlong captureUsec, jint x, jint y, jint width, jint height,
+                                                   jbyteArray payload, jint length) {
+	MumbleCore::VideoUnit unit;
+	unit.streamID             = static_cast< std::uint32_t >(streamId);
+	unit.frameNumber          = static_cast< std::uint64_t >(frameNumber);
+	unit.unitID               = static_cast< std::uint32_t >(unitId);
+	unit.isKeyframe           = isKeyframe;
+	unit.isFrameEnd           = isFrameEnd;
+	unit.captureTimestampUsec = static_cast< std::uint64_t >(captureUsec);
+	unit.x                    = static_cast< std::uint32_t >(x);
+	unit.y                    = static_cast< std::uint32_t >(y);
+	unit.width                = static_cast< std::uint32_t >(width);
+	unit.height               = static_cast< std::uint32_t >(height);
+	const auto bytes          = fromJava(env, payload, length);
+	unit.payload.assign(bytes.begin(), bytes.end());
+
+	const auto datagrams = fromHandle(handle)->session.makeVideo(unit);
+	jclass byteArrayClass = env->FindClass("[B");
+	jobjectArray result   = env->NewObjectArray(static_cast< jsize >(datagrams.size()), byteArrayClass, nullptr);
+	if (!result) {
+		return nullptr;
+	}
+	for (std::size_t i = 0; i < datagrams.size(); ++i) {
+		jbyteArray element = toJava(env, datagrams[i]);
+		env->SetObjectArrayElement(result, static_cast< jsize >(i), element);
+		env->DeleteLocalRef(element);
+	}
+	return result;
+}
+
 JNIEXPORT void JNICALL FN(nativeRemoveSender)(JNIEnv *, jclass, jlong handle, jint session) {
 	fromHandle(handle)->session.removeSender(static_cast< std::uint32_t >(session));
 }

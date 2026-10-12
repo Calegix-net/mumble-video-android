@@ -213,6 +213,12 @@ public:
 	std::optional< Bytes > makeAudio(ByteView opusFrame, std::uint64_t frameNumber, std::uint32_t target,
 									 bool isLastFrame);
 
+	/// Fragments and encrypts one coded unit of our own video stream into datagrams for sendto(). It uses
+	/// the same video crypt state the session already uses for retransmission requests, so there is one
+	/// sequence (nonce) space per connection and no nonce is ever reused. senderSession is ignored (the
+	/// server stamps it). Empty if not keyed, or if the unit is larger than one unit may be.
+	std::vector< Bytes > makeVideo(const VideoUnit &unit);
+
 	/// Forgets what is held for a user (their partial video units), when they leave or stop sending.
 	void removeSender(std::uint32_t senderSession);
 
