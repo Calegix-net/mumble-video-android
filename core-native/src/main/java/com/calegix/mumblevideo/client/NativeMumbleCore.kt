@@ -1229,6 +1229,9 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             }
             screen = streamer
             screenKey = key
+            // Audio first, as the desktop does: an older client keeps one surface per sender and lets
+            // the latest announcement win, so the picture has to be the last thing it hears about.
+            if (request.includeAudio) startScreenAudio(me, name, projection)
             announceLocal(
                 key,
                 codec,
@@ -1244,21 +1247,42 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                     screen = LocalStream(key, streamer.outputWidth, streamer.outputHeight, request.framerate, codec),
                 )
             }
-            if (request.includeAudio) startScreenAudio(me, key, name, projection)
+            foldScreenAudio(key)
+        }
+
+        /** Lists our share audio under the picture it belongs to, as receivers do. */
+        private fun foldScreenAudio(pictureKey: StreamKey) {
+            val audioKey = screenAudioKey ?: return
+            _videoStreams.update { streams ->
+                streams.map {
+                    if (it.key == pictureKey) it.copy(audio = StreamAudio(audioStreamId = audioKey.streamId)) else it
+                }
+            }
         }
 
         /**
          * The phone turned mid-share and the picture changed shape: that is a new stream in the
-         * protocol, so withdraw the old one and announce its successor. The sound stream carries on
-         * unchanged but is announced again, since viewers attach it to the screen stream they know.
+         * protocol. In the desktop's order: the sound stream (unchanged, but announced again so
+         * one-surface clients don't end up holding it), then the new picture, then the old one's end.
+         * Viewers that see the replacement before the end keep watching through it.
          */
         private fun reannounceScreen(me: UserSession, name: String, width: Int, height: Int) {
             val streamer = screen ?: return
             val oldKey = screenKey ?: return
-            val audio = _videoStreams.value.firstOrNull { it.key == oldKey }?.audio
             val streamId = nextStreamId++
             val key = StreamKey(me, streamId)
-            withdrawLocal(oldKey, announce = true)
+            screenAudioKey?.let { audioKey ->
+                send(
+                    ControlType.VIDEO_STATE,
+                    MumbleProto.VideoState.newBuilder()
+                        .setStreamId(audioKey.streamId)
+                        .setActive(true)
+                        .setCodec(MumbleProto.VideoState.Codec.OpusAudio)
+                        .setSourceKind(MumbleProto.VideoState.SourceKind.Display)
+                        .setSourceName(name)
+                        .build(),
+                )
+            }
             screenStreamId = streamId
             screenKey = key
             val framerate = streamer.config.framerate
@@ -1275,19 +1299,8 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             _localVideo.update {
                 it.copy(screen = LocalStream(key, width, height, framerate, streamer.config.codec))
             }
-            if (audio != null) {
-                send(
-                    ControlType.VIDEO_STATE,
-                    MumbleProto.VideoState.newBuilder()
-                        .setStreamId(audio.audioStreamId)
-                        .setActive(true)
-                        .setCodec(MumbleProto.VideoState.Codec.OpusAudio)
-                        .setSourceKind(MumbleProto.VideoState.SourceKind.Display)
-                        .setSourceName(name)
-                        .build(),
-                )
-                _videoStreams.update { streams -> streams.map { if (it.key == key) it.copy(audio = audio) else it } }
-            }
+            foldScreenAudio(key)
+            withdrawLocal(oldKey, announce = true)
         }
 
         /**
@@ -1296,7 +1309,6 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
          */
         private fun startScreenAudio(
             me: UserSession,
-            pictureKey: StreamKey,
             name: String,
             projection: MediaProjection,
         ) {
@@ -1329,9 +1341,6 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                     .setSourceName(name)
                     .build(),
             )
-            _videoStreams.update { streams ->
-                streams.map { if (it.key == pictureKey) it.copy(audio = StreamAudio(audioStreamId = streamId)) else it }
-            }
             Log.i(TAG, "sending screen audio as $key")
         }
 
