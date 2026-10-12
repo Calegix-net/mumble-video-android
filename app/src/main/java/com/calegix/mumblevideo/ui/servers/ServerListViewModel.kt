@@ -4,15 +4,22 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.calegix.mumblevideo.core.ConnectionState
 import com.calegix.mumblevideo.core.ServerAddress
+import com.calegix.mumblevideo.data.servers.PingResult
 import com.calegix.mumblevideo.data.servers.SavedServer
+import com.calegix.mumblevideo.data.servers.ServerPinger
 import com.calegix.mumblevideo.data.servers.ServerRepository
 import com.calegix.mumblevideo.session.SessionController
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -50,19 +57,49 @@ data class ServerListUiState(
     val editor: ServerEditor? = null,
     val pendingDelete: SavedServer? = null,
     val loading: Boolean = true,
+    /** Latest ping answer per server id; absent until answered. */
+    val pings: Map<Long, PingResult> = emptyMap(),
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class ServerListViewModel(
     private val repository: ServerRepository,
     private val session: SessionController,
+    private val pinger: ServerPinger = ServerPinger { _, _ -> null },
 ) : ViewModel() {
+
+    private val pings = MutableStateFlow<Map<Long, PingResult>>(emptyMap())
+
+    /** Pings every listed server now and then, like Mumble's server list. Runs only while watched. */
+    private val pingLoop = repository.servers.transformLatest { servers ->
+        while (true) {
+            coroutineScope {
+                servers.forEach { server ->
+                    launch {
+                        val result = pinger.ping(server.host, server.port)
+                        pings.update { if (result == null) it - server.id else it + (server.id to result) }
+                    }
+                }
+            }
+            emit(Unit)
+            delay(PING_INTERVAL_MS)
+        }
+    }
 
     private val editor = MutableStateFlow<ServerEditor?>(null)
     private val pendingDelete = MutableStateFlow<SavedServer?>(null)
 
     val uiState: StateFlow<ServerListUiState> =
-        combine(repository.servers, editor, pendingDelete) { servers, editor, delete ->
-            ServerListUiState(servers, editor, delete, loading = false)
+        combine(
+            repository.servers,
+            editor,
+            pendingDelete,
+            pings,
+            pingLoop.onStart {
+                emit(Unit)
+            },
+        ) { servers, editor, delete, pings, _ ->
+            ServerListUiState(servers, editor, delete, loading = false, pings = pings)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ServerListUiState())
 
     /** Name of the server we're connected (or connecting) to, for the "return to session" card. */
@@ -148,5 +185,9 @@ class ServerListViewModel(
         val server = pendingDelete.value ?: return
         pendingDelete.value = null
         viewModelScope.launch { repository.delete(server.id) }
+    }
+
+    private companion object {
+        const val PING_INTERVAL_MS = 15_000L
     }
 }

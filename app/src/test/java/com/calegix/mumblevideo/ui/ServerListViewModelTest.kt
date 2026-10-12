@@ -2,7 +2,9 @@ package com.calegix.mumblevideo.ui
 
 import com.calegix.mumblevideo.MainDispatcherRule
 import com.calegix.mumblevideo.TestGraph
+import com.calegix.mumblevideo.data.servers.PingResult
 import com.calegix.mumblevideo.data.servers.SavedServer
+import com.calegix.mumblevideo.data.servers.ServerPinger
 import com.calegix.mumblevideo.keepCollecting
 import com.calegix.mumblevideo.settle
 import com.calegix.mumblevideo.ui.servers.ServerListViewModel
@@ -104,5 +106,19 @@ class ServerListViewModelTest {
 
         assertEquals("Test", vm.activeSession.value)
         assertEquals(1_000L, graph.servers.get(id)?.lastConnectedEpochMillis)
+    }
+
+    @Test
+    fun `servers are pinged and answers shown, silence shows nothing`() = runTest {
+        val graph = TestGraph(this)
+        val up = graph.servers.save(SavedServer(label = "Up", host = "up.example"))
+        val down = graph.servers.save(SavedServer(label = "Down", host = "down.example"))
+        val pinger = ServerPinger { host, _ -> if (host == "up.example") PingResult(3, 20, 42, "1.7.0") else null }
+        val vm = ServerListViewModel(graph.servers, graph.session, pinger)
+        keepCollecting(vm.uiState)
+        settle()
+
+        assertEquals(PingResult(3, 20, 42, "1.7.0"), vm.uiState.value.pings[up])
+        assertNull(vm.uiState.value.pings[down])
     }
 }

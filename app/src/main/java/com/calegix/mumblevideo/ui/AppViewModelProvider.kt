@@ -18,7 +18,7 @@ import com.calegix.mumblevideo.ui.video.VideoViewModel
 object AppViewModelProvider {
     val Factory = viewModelFactory {
         initializer { MainViewModel(container().session, container().settings) }
-        initializer { ServerListViewModel(container().servers, container().session) }
+        initializer { ServerListViewModel(container().servers, container().session, container().pinger) }
         initializer { PublicServersViewModel(container().publicServers, container().servers) }
         initializer { SessionViewModel(container().session, container().settings) }
         initializer { ChatViewModel(container().session, container().settings) }

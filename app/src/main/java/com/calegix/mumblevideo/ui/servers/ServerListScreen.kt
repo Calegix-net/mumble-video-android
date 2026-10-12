@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.calegix.mumblevideo.core.ServerAddress
+import com.calegix.mumblevideo.data.servers.PingResult
 import com.calegix.mumblevideo.data.servers.SavedServer
 import com.calegix.mumblevideo.ui.AppViewModelProvider
 
@@ -167,6 +168,7 @@ fun ServerListScreen(
                 items(state.servers, key = { it.id }) { server ->
                     ServerCard(
                         server = server,
+                        ping = state.pings[server.id],
                         onConnect = { viewModel.requestConnect(server) },
                         onToggleFavourite = { viewModel.toggleFavourite(server) },
                         onEdit = { viewModel.editServer(server) },
@@ -206,6 +208,7 @@ fun ServerListScreen(
 @Composable
 private fun ServerCard(
     server: SavedServer,
+    ping: PingResult?,
     onConnect: () -> Unit,
     onToggleFavourite: () -> Unit,
     onEdit: () -> Unit,
@@ -238,6 +241,13 @@ private fun ServerCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                ping?.let {
+                    Text(
+                        "${it.users}/${it.maxUsers} users · ${it.latencyMillis} ms",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 if (server.username.isNotBlank()) {
                     Text(
                         "as ${server.username}",

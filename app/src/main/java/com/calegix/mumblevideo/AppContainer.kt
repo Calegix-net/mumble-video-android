@@ -10,9 +10,11 @@ import com.calegix.mumblevideo.data.db.AppDatabase
 import com.calegix.mumblevideo.data.servers.PublicServerSource
 import com.calegix.mumblevideo.data.servers.RoomServerRepository
 import com.calegix.mumblevideo.data.servers.RoomTrustStore
+import com.calegix.mumblevideo.data.servers.ServerPinger
 import com.calegix.mumblevideo.data.servers.ServerRepository
 import com.calegix.mumblevideo.data.servers.StubPublicServerSource
 import com.calegix.mumblevideo.data.servers.TrustStore
+import com.calegix.mumblevideo.data.servers.UdpServerPinger
 import com.calegix.mumblevideo.data.settings.DataStoreSettingsRepository
 import com.calegix.mumblevideo.data.settings.SettingsRepository
 import com.calegix.mumblevideo.service.ConnectionService
@@ -52,6 +54,7 @@ class AppContainer(context: Context) {
     val certificates: CertificateRepository =
         FileCertificateRepository(database.certificates(), File(appContext.filesDir, "certificates"))
     val publicServers: PublicServerSource = StubPublicServerSource()
+    val pinger: ServerPinger = UdpServerPinger()
 
     val session = SessionController(
         core = core,
