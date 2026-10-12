@@ -9,6 +9,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -288,6 +289,7 @@ private fun ChatImage(bytes: ByteArray, description: String) {
         Text("Picture could not be shown", style = MaterialTheme.typography.bodyMedium)
         return
     }
+    var viewing by rememberSaveable { mutableStateOf(false) }
     Image(
         bitmap = bitmap,
         contentDescription = description,
@@ -295,6 +297,8 @@ private fun ChatImage(bytes: ByteArray, description: String) {
         modifier = Modifier
             .padding(vertical = 4.dp)
             .heightIn(max = 320.dp)
-            .clip(RoundedCornerShape(8.dp)),
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClickLabel = "View full screen") { viewing = true },
     )
+    if (viewing) ImageViewer(bitmap, description, onDismiss = { viewing = false })
 }
