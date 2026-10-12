@@ -150,7 +150,7 @@ class CameraStreamer(
         outputWidth = encodeWidth
         outputHeight = encodeHeight
         // The sizes follow the full upright rotation; the texture only needs what the transform lacks.
-        val textureRotation = CameraMath.textureRotation(sensor, effectiveDisplayRotation(), front)
+        val textureRotation = CameraMath.textureRotation(effectiveDisplayRotation())
         encodedOrientation = CameraMath.texMatrix(textureRotation, mirror = false)
         previewOrientation = CameraMath.texMatrix(textureRotation, mirror = front)
         val fpsRanges = characteristics[CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES].orEmpty()

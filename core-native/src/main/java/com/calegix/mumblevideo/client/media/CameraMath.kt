@@ -57,15 +57,14 @@ internal object CameraMath {
     }
 
     /**
-     * The rotation the GL pass itself must apply. Camera2 already puts the sensor's mounting
-     * rotation into the SurfaceTexture transform (which is why a plain preview is upright in the
-     * device's natural orientation), so only the part for how the device is held remains. Applying
-     * [uprightRotation] in full on top of that transform turns the picture a quarter too far.
+     * The rotation the GL pass itself must apply. Camera2 already puts the sensor's mounting (and
+     * the front camera's) into the SurfaceTexture transform, which is why a plain preview is upright
+     * in the device's natural orientation; what remains is how the device is held, the same for
+     * either camera. Found on a Pixel 9 Pro: applying the full [uprightRotation] turned the picture a
+     * quarter too far, and negating the device part for either camera left it upside down in
+     * landscape.
      */
-    fun textureRotation(sensorOrientation: Int, displayRotation: Int, frontFacing: Boolean): Int =
-        // The texture matrix turns the sampled image the other way from the output, so the device
-        // part is applied negated (measured on a Pixel 9 Pro: without it, landscape is upside down).
-        ((sensorOrientation - uprightRotation(sensorOrientation, displayRotation, frontFacing)) % 360 + 360) % 360
+    fun textureRotation(displayRotation: Int): Int = (360 - displayRotation) % 360
 
     /** Size of the upright image: a quarter turn swaps the sides. */
     fun uprightSize(width: Int, height: Int, rotation: Int): Pair<Int, Int> =
