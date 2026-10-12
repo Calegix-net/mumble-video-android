@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ScreenShare
@@ -36,13 +37,16 @@ import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.VideocamOff
 import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -119,6 +123,7 @@ fun VideoPane(
                         onSwitchCamera = viewModel::switchCamera,
                         onStopScreen = viewModel::stopScreenShare,
                         onScreenConsent = viewModel::startScreenShare,
+                        onChooseShareAudio = viewModel::setShareDeviceAudio,
                     )
                 }
                 if (state.tiles.isEmpty()) {
@@ -151,6 +156,7 @@ private fun OwnVideoControls(
     onSwitchCamera: () -> Unit,
     onStopScreen: () -> Unit,
     onScreenConsent: (resultCode: Int, data: Intent) -> Unit,
+    onChooseShareAudio: (Boolean) -> Unit,
 ) {
     val cameraOn = state.local.camera != null
     val sharing = state.local.screen != null
@@ -159,10 +165,24 @@ private fun OwnVideoControls(
         if (granted) onToggleCamera()
     }
     val context = LocalContext.current
+    var askAudio by remember { mutableStateOf(false) }
+    // The system's own picker comes next (a single app or the whole screen); it has no audio choice.
     // The system's "start recording or casting?" consent; skipped when the app-op is pre-allowed.
     val screenConsent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val data = result.data
         if (result.resultCode == Activity.RESULT_OK && data != null) onScreenConsent(result.resultCode, data)
+    }
+    if (askAudio) {
+        ShareAudioDialog(
+            initial = state.shareDeviceAudio,
+            onContinue = { share ->
+                askAudio = false
+                onChooseShareAudio(share)
+                val projection = context.getSystemService(MediaProjectionManager::class.java)
+                screenConsent.launch(projection.createScreenCaptureIntent())
+            },
+            onDismiss = { askAudio = false },
+        )
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -184,8 +204,7 @@ private fun OwnVideoControls(
                     if (sharing) {
                         onStopScreen()
                     } else {
-                        val projection = context.getSystemService(MediaProjectionManager::class.java)
-                        screenConsent.launch(projection.createScreenCaptureIntent())
+                        askAudio = true
                     }
                 },
             ) {
@@ -315,4 +334,37 @@ internal fun statusLabel(subscription: Subscription): String = when (subscriptio
     Subscription.Pending -> "connecting…"
     is Subscription.Active -> "${subscription.framesPerSecond.toInt()} fps"
     is Subscription.Failed -> subscription.reason
+}
+
+@Composable
+private fun ShareAudioDialog(initial: Boolean, onContinue: (Boolean) -> Unit, onDismiss: () -> Unit) {
+    var share by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.AutoMirrored.Outlined.ScreenShare, contentDescription = null) },
+        title = { Text("Share your screen") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Next, Android asks whether to share one app or the whole screen.")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .toggleable(value = share, role = Role.Switch, onValueChange = { share = it }),
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Share the phone's sound", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Videos, music and games; never your voice or others in the call",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = share, onCheckedChange = null)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onContinue(share) }) { Text("Continue") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

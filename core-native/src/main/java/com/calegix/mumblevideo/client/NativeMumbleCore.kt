@@ -22,6 +22,7 @@ import com.calegix.mumblevideo.client.media.FrameCounter
 import com.calegix.mumblevideo.client.media.MediaEvents
 import com.calegix.mumblevideo.client.media.MumbleCoreMedia
 import com.calegix.mumblevideo.client.media.OrientationTracker
+import com.calegix.mumblevideo.client.media.ScreenAudioStreamer
 import com.calegix.mumblevideo.client.media.ScreenStreamer
 import com.calegix.mumblevideo.client.media.VideoDecoder
 import com.calegix.mumblevideo.client.net.ControlFraming
@@ -56,6 +57,7 @@ import com.calegix.mumblevideo.core.ScreenShareRequest
 import com.calegix.mumblevideo.core.ServerCapabilities
 import com.calegix.mumblevideo.core.ServerInfo
 import com.calegix.mumblevideo.core.ServerState
+import com.calegix.mumblevideo.core.StreamAudio
 import com.calegix.mumblevideo.core.StreamKey
 import com.calegix.mumblevideo.core.Subscription
 import com.calegix.mumblevideo.core.TalkState
@@ -1118,6 +1120,10 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
 
         @Volatile private var screenKey: StreamKey? = null
 
+        @Volatile private var screenAudio: ScreenAudioStreamer? = null
+
+        @Volatile private var screenAudioKey: StreamKey? = null
+
         fun startScreen(request: ScreenShareRequest, projection: MediaProjection) {
             val me = self ?: throw MumbleCoreException(Kind.NotConnected, "Not synchronised yet")
             stopScreen()
@@ -1164,9 +1170,84 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                     screen = LocalStream(key, streamer.outputWidth, streamer.outputHeight, request.framerate, codec),
                 )
             }
+            if (request.includeAudio) startScreenAudio(me, key, name, projection)
+        }
+
+        /**
+         * The phone's sound with the share: a separate OpusAudio stream, as the desktop sends it.
+         * Without the microphone permission (playback capture needs it) the share goes on silent.
+         */
+        private fun startScreenAudio(
+            me: UserSession,
+            pictureKey: StreamKey,
+            name: String,
+            projection: MediaProjection,
+        ) {
+            if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                Log.i(TAG, "screen share without audio: no microphone permission")
+                return
+            }
+            val streamId = nextStreamId++
+            val key = StreamKey(me, streamId)
+            val streamer = ScreenAudioStreamer(
+                projection = projection,
+                onUnit = { frameNumber, captureUsec, opus -> sendAudioUnit(streamId, frameNumber, captureUsec, opus) },
+                onError = { reason -> Log.w(TAG, "screen audio stopped: $reason") },
+            )
+            try {
+                streamer.start()
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "screen share without audio: ${e.message}")
+                return
+            }
+            screenAudio = streamer
+            screenAudioKey = key
+            send(
+                ControlType.VIDEO_STATE,
+                MumbleProto.VideoState.newBuilder()
+                    .setStreamId(streamId)
+                    .setActive(true)
+                    .setCodec(MumbleProto.VideoState.Codec.OpusAudio)
+                    .setSourceKind(MumbleProto.VideoState.SourceKind.Display)
+                    .setSourceName(name)
+                    .build(),
+            )
+            _videoStreams.update { streams ->
+                streams.map { if (it.key == pictureKey) it.copy(audio = StreamAudio(audioStreamId = streamId)) else it }
+            }
+            Log.i(TAG, "sending screen audio as $key")
+        }
+
+        private fun sendAudioUnit(streamId: Int, frameNumber: Long, captureUsec: Long, opus: ByteArray) {
+            val u = udp ?: return
+            if (!udpVerified || request.forceTcp) return
+            val datagrams = synchronized(media) {
+                // As the desktop frames it: every Opus packet is a whole, independently decodable unit.
+                media.makeVideo(
+                    streamId = streamId,
+                    frameNumber = frameNumber,
+                    isKeyframe = true,
+                    captureTimestampUsec = captureUsec,
+                    width = 0,
+                    height = 0,
+                    payload = opus,
+                )
+            }
+            datagrams.forEach(u::sendRaw)
         }
 
         fun stopScreen(announce: Boolean = true) {
+            screenAudio?.close()
+            screenAudio = null
+            screenAudioKey?.let { key ->
+                if (announce) {
+                    send(
+                        ControlType.VIDEO_STATE,
+                        MumbleProto.VideoState.newBuilder().setStreamId(key.streamId).setActive(false).build(),
+                    )
+                }
+            }
+            screenAudioKey = null
             val streamer = screen ?: return
             val key = screenKey
             screen = null

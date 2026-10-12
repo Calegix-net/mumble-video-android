@@ -33,6 +33,8 @@ data class VideoUiState(
     val autoSubscribe: Boolean = true,
     val dataSaver: Boolean = false,
     val maxVideoBandwidth: Int = 0,
+    /** Last answer to "share the phone's sound too?", offered as the default next time. */
+    val shareDeviceAudio: Boolean = true,
 )
 
 /** What a view showing a stream needs: hold a subscription and hand over its surface. */
@@ -79,6 +81,7 @@ class VideoViewModel(
             }.sortedBy { it.name.lowercase() },
             autoSubscribe = prefs.autoSubscribe && !prefs.dataSaver,
             dataSaver = prefs.dataSaver,
+            shareDeviceAudio = prefs.shareDeviceAudio,
             maxVideoBandwidth = caps.maxVideoBandwidth,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), VideoUiState())
@@ -142,6 +145,10 @@ class VideoViewModel(
     }
 
     fun stopScreenShare() = command { core.stopScreenShare() }
+
+    fun setShareDeviceAudio(share: Boolean) {
+        viewModelScope.launch { settings.update { it.copy(shareDeviceAudio = share) } }
+    }
 
     /** Starts sharing with the result of the system's screen-capture consent. */
     fun startScreenShare(resultCode: Int, data: Intent) = command {

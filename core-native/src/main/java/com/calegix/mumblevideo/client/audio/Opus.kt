@@ -4,6 +4,7 @@ package com.calegix.mumblevideo.client.audio
 internal object Opus {
     const val SAMPLE_RATE = 48_000
     const val APPLICATION_VOIP = 2048
+    const val APPLICATION_AUDIO = 2049
     private const val SET_BITRATE = 4002
     private const val SET_VBR = 4006
     private const val SET_INBAND_FEC = 4012
@@ -20,12 +21,16 @@ internal object Opus {
 
     val version: String get() = nativeVersion()
 
-    class Encoder(bitrate: Int) : AutoCloseable {
-        private var handle = nativeEncoderCreate(SAMPLE_RATE, 1, APPLICATION_VOIP)
+    /**
+     * [channels] 1 or 2 (interleaved). [application] VOIP for speech, AUDIO for shared device sound;
+     * only speech is told it is a voice signal.
+     */
+    class Encoder(bitrate: Int, channels: Int = 1, application: Int = APPLICATION_VOIP) : AutoCloseable {
+        private var handle = nativeEncoderCreate(SAMPLE_RATE, channels, application)
 
         init {
             check(handle != 0L) { "opus_encoder_create failed" }
-            nativeEncoderCtl(handle, SET_SIGNAL, SIGNAL_VOICE)
+            if (application == APPLICATION_VOIP) nativeEncoderCtl(handle, SET_SIGNAL, SIGNAL_VOICE)
             nativeEncoderCtl(handle, SET_VBR, 0) // constant bitrate, as Mumble does
             nativeEncoderCtl(handle, SET_INBAND_FEC, 1)
             nativeEncoderCtl(handle, SET_PACKET_LOSS_PERC, 5)
@@ -36,7 +41,7 @@ internal object Opus {
             nativeEncoderCtl(handle, SET_BITRATE, bitrate)
         }
 
-        /** Encodes [frameSize] mono samples. Returns the packet length written to [out], or a negative error. */
+        /** Encodes [frameSize] samples per channel. Returns the packet length written to [out], or a negative error. */
         fun encode(pcm: ShortArray, frameSize: Int, out: ByteArray): Int = nativeEncode(handle, pcm, frameSize, out)
 
         override fun close() {
@@ -45,8 +50,9 @@ internal object Opus {
         }
     }
 
-    class Decoder : AutoCloseable {
-        private var handle = nativeDecoderCreate(SAMPLE_RATE, 1)
+    /** [channels] 1 or 2; decoded samples come out interleaved. */
+    class Decoder(channels: Int = 1) : AutoCloseable {
+        private var handle = nativeDecoderCreate(SAMPLE_RATE, channels)
 
         init {
             check(handle != 0L) { "opus_decoder_create failed" }
