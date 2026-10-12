@@ -229,7 +229,8 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         val ssl = try {
             Tls.context(request.certificate, trust)
         } catch (e: Exception) {
-            val reason = "Your client certificate could not be loaded (${e.message}). Pick another one in Settings › Authentication."
+            val reason = "Your client certificate could not be loaded (${e.message}). " +
+                "Pick another one in Settings › Authentication."
             return Outcome.Final(ConnectionState.Disconnected(DisconnectReason.Unreachable(reason)))
         }
         val socket = try {
@@ -553,7 +554,8 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             if (config.hasWelcomeText()) welcome = config.welcomeText
             Log.i(
                 TAG,
-                "server config: messageLength=${config.messageLength} imageMessageLength=${config.imageMessageLength} " +
+                "server config: messageLength=${config.messageLength} " +
+                    "imageMessageLength=${config.imageMessageLength} " +
                     "allowHtml=${config.allowHtml} features=${config.featuresList}",
             )
             if (_connectionState.value is ConnectionState.Connected) publishConnected()
