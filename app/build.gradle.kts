@@ -8,15 +8,32 @@ plugins {
 android {
     namespace = "com.calegix.mumblevideo"
     compileSdk = 37
+    // The NDK that strips the native library's debug info when packaging (26 MB of the 28).
+    ndkVersion = libs.versions.ndk.get()
 
     defaultConfig {
         applicationId = "com.calegix.mumblevideo"
         minSdk = 29 // AudioPlaybackCapture, for sharing device audio with a screen share
         targetSdk = 37
-        versionCode = 1
+        // CI passes its run number so every published build upgrades the last one.
+        versionCode = providers.environmentVariable("MV_VERSION_CODE").orNull?.toInt() ?: 1
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Release signing comes from the environment (a local env file, or CI secrets), never the repo.
+    // Without it the release build is left unsigned.
+    val keystore = providers.environmentVariable("MV_KEYSTORE").orNull
+    signingConfigs {
+        if (keystore != null) {
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = providers.environmentVariable("MV_KEYSTORE_PASSWORD").get()
+                keyAlias = providers.environmentVariable("MV_KEY_ALIAS").get()
+                keyPassword = providers.environmentVariable("MV_KEY_PASSWORD").get()
+            }
+        }
     }
 
     buildTypes {
@@ -27,6 +44,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (keystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
 
