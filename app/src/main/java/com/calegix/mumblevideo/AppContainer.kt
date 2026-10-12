@@ -65,6 +65,7 @@ class AppContainer(context: Context) {
         trustStore = trustStore,
         scope = appScope,
         onSessionStarting = { ConnectionService.start(appContext) },
+        autoCertificate = !simulated,
     )
 
     init {

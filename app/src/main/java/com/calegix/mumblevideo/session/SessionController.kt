@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -32,6 +33,8 @@ class SessionController(
     private val scope: CoroutineScope,
     private val clock: () -> Long = System::currentTimeMillis,
     private val onSessionStarting: () -> Unit = {},
+    /** Generate a certificate on the first connect if the user has none, as Mumla does. */
+    private val autoCertificate: Boolean = false,
 ) {
     private val _currentServer = MutableStateFlow<SavedServer?>(null)
 
@@ -56,6 +59,7 @@ class SessionController(
     }
 
     suspend fun connect(server: SavedServer) {
+        if (autoCertificate) ensureCertificate()
         val current = settings.settings.value
         val certificate = current.selectedCertificateId?.let { certificates.load(it) }
         _currentServer.value = server
@@ -77,6 +81,23 @@ class SessionController(
             ),
         )
         if (server.id != 0L) servers.markConnected(server.id, clock())
+    }
+
+    /**
+     * Servers know registered users by certificate, so without one the user can never register and
+     * every connection is a stranger. If none exists yet, make one quietly and select it. Someone
+     * who deliberately chose "No certificate" while having some keeps that choice.
+     */
+    private suspend fun ensureCertificate() {
+        if (settings.settings.value.selectedCertificateId != null) return
+        if (certificates.certificates.first().isNotEmpty()) return
+        val name = settings.settings.value.defaultUsername
+        runCatching {
+            val generated = core.generateCertificate(name)
+            val info = core.inspectCertificate(generated.pkcs12, generated.password)
+            val id = certificates.add(name, generated, info, clock())
+            settings.update { it.copy(selectedCertificateId = id) }
+        }
     }
 
     suspend fun disconnect() {

@@ -74,4 +74,26 @@ class CertificatesViewModelTest {
         // The fake core registers users who present a certificate.
         assertNotNull(graph.core.serverState.value.selfUser?.registeredId)
     }
+
+    @Test
+    fun `a first connect without any certificate makes one, but a deliberate none is kept`() = runTest {
+        val graph = TestGraph(this)
+        val session = com.calegix.mumblevideo.session.SessionController(
+            graph.core,
+            graph.settings,
+            graph.servers,
+            graph.certificates,
+            graph.trust,
+            backgroundScope,
+            autoCertificate = true,
+        )
+        session.connect(TestGraph.SERVER)
+        settle()
+        assertNotNull(graph.settings.settings.value.selectedCertificateId)
+
+        graph.settings.update { it.copy(selectedCertificateId = null) }
+        session.connect(TestGraph.SERVER)
+        settle()
+        assertNull(graph.settings.settings.value.selectedCertificateId)
+    }
 }
