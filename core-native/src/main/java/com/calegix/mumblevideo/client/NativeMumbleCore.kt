@@ -3,6 +3,8 @@ package com.calegix.mumblevideo.client
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
@@ -147,6 +149,26 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
 
     init {
         scope.launch { expireTalkStates() }
+        watchNetwork()
+    }
+
+    /**
+     * When the phone's default network changes (Wi-Fi to mobile and back), the old TCP connection
+     * is dead even though nothing has failed yet. Drop it at once so the reconnect starts now, not
+     * after the silence watchdog fires.
+     */
+    private fun watchNetwork() {
+        val connectivity = context.getSystemService(ConnectivityManager::class.java) ?: return
+        var current: Network? = null
+        connectivity.registerDefaultNetworkCallback(
+            object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    val previous = current
+                    current = network
+                    if (previous != null && previous != network) link?.drop("default network changed")
+                }
+            },
+        )
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -421,6 +443,14 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             }
         }
 
+        @Volatile private var lastHeardFromServer = SystemClock.elapsedRealtime()
+
+        /** Closing the socket ends the read loop, which ends the session and starts a reconnect. */
+        fun drop(why: String) {
+            Log.i(TAG, "dropping the connection: $why")
+            runCatching { socket.close() }
+        }
+
         private fun readLoop(input: InputStream) {
             val reader = ControlReader()
             val buffer = ByteArray(16 * 1024)
@@ -428,6 +458,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 while (true) {
                     val n = input.read(buffer)
                     if (n < 0) break
+                    lastHeardFromServer = SystemClock.elapsedRealtime()
                     reader.feed(buffer, n)
                     reader.drain().forEach { inbox.trySend(it) }
                 }
@@ -735,6 +766,12 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             while (scope.isActive) {
                 delay(PING_INTERVAL_MS)
                 tick++
+                // The server answers our TCP pings, so this much silence means the link is dead,
+                // not quiet (a phone changing networks leaves the socket open but useless).
+                if (SystemClock.elapsedRealtime() - lastHeardFromServer > SERVER_SILENCE_LIMIT_MS) {
+                    drop("nothing from the server for ${SERVER_SILENCE_LIMIT_MS / 1000} s")
+                    return
+                }
                 val now = nowMicros()
                 val u = udp
                 if (u != null && crypt.isValid) {
@@ -1111,6 +1148,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         const val CONNECT_TIMEOUT_MS = 10_000
         const val PING_INTERVAL_MS = 5_000L
         const val MIC_RELEASE_DELAY_MS = 150L
+        const val SERVER_SILENCE_LIMIT_MS = 35_000L
         const val TALK_TIMEOUT_MS = 300L
 
         // We speak the protocol of mumble-core's version: 1.7.0.
