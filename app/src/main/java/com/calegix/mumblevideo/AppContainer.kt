@@ -19,6 +19,7 @@ import com.calegix.mumblevideo.data.settings.DataStoreSettingsRepository
 import com.calegix.mumblevideo.data.settings.SettingsRepository
 import com.calegix.mumblevideo.service.ConnectionService
 import com.calegix.mumblevideo.service.MessageNotifier
+import com.calegix.mumblevideo.service.VoiceFeedback
 import com.calegix.mumblevideo.session.SessionController
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -71,5 +72,6 @@ class AppContainer(context: Context) {
             appScope.launch { settings.settings.collect { fake.simulateConnectionDrops = it.simulateConnectionDrops } }
         }
         MessageNotifier(appContext, session, settings, appScope).start()
+        VoiceFeedback(appContext, session, settings, appScope).start()
     }
 }

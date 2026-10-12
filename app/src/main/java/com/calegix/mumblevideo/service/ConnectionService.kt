@@ -51,10 +51,20 @@ class ConnectionService : LifecycleService() {
         }
         if (!started) {
             started = true
+            headset.start()
             goForeground(build(session.core.connectionState.value, session.core.voiceState.value))
             observe()
         }
         return START_NOT_STICKY
+    }
+
+    private val headset by lazy {
+        HeadsetButton(this, session, (application as MumbleVideoApp).container.settings, lifecycleScope)
+    }
+
+    override fun onDestroy() {
+        headset.stop()
+        super.onDestroy()
     }
 
     private fun observe() {
