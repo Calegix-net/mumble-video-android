@@ -20,6 +20,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the version code is the commit count
 
       - uses: actions/setup-java@v4
         with:
@@ -44,8 +46,6 @@ jobs:
           MV_KEY_ALIAS: ${{ secrets.MV_KEY_ALIAS }}
           MV_KEY_PASSWORD: ${{ secrets.MV_KEY_PASSWORD }}
         run: |
-          # Every CI build upgrades the last; 1 was the first hand-built release.
-          export MV_VERSION_CODE=$(( GITHUB_RUN_NUMBER + 1 ))
           # Pull requests from forks get no secrets: build unsigned rather than fail.
           if [ -n "$MV_KEYSTORE_B64" ]; then
             echo "$MV_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"

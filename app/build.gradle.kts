@@ -15,8 +15,13 @@ android {
         applicationId = "com.calegix.mumblevideo"
         minSdk = 29 // AudioPlaybackCapture, for sharing device audio with a screen share
         targetSdk = 37
-        // CI passes its run number so every published build upgrades the last one.
-        versionCode = providers.environmentVariable("MV_VERSION_CODE").orNull?.toInt() ?: 1
+        // The commit count, so every build of a later commit upgrades an earlier one, wherever it
+        // was built (CI and hand builds agree). MV_VERSION_CODE overrides; 1 outside a git checkout.
+        versionCode = providers.environmentVariable("MV_VERSION_CODE").orNull?.toInt()
+            ?: runCatching {
+                providers.exec { commandLine("git", "rev-list", "--count", "HEAD") }
+                    .standardOutput.asText.get().trim().toInt()
+            }.getOrDefault(1)
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
