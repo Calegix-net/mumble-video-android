@@ -11,16 +11,22 @@ import java.util.concurrent.TimeUnit
 
 /**
  * One subscribed stream's decoder: whole frames from [FrameAssembler] into MediaCodec, rendered
- * straight to the Surface the UI handed down (MumbleCore.setVideoSurface). Not wired up yet.
+ * straight to the Surface the UI handed down (MumbleCore.setVideoSurface).
  *
  * Threads: [submit] from the network thread, [setSurface] and [close] from the main thread, and
  * the codec runs on its own thread. [setSurface] with null and [close] return only once the codec
- * has let go of the surface, as the MumbleCore contract requires.
+ * has let go of the surface, as the MumbleCore contract requires. Without a surface, frames are
+ * simply dropped: there is nowhere to show them, and asking for keyframes would only cost the sender.
  *
  * TiledImage streams are not decoded here; they are pictures drawn at (x, y), not codec input.
  */
 class VideoDecoder(
     private val codec: VideoCodec,
+    /** The announced size, used when units don't carry one (whole-frame codecs often leave it 0). */
+    private val announcedWidth: Int,
+    private val announcedHeight: Int,
+    /** Called on the codec thread for every rendered frame, with its size. */
+    private val onFrame: (width: Int, height: Int) -> Unit = { _, _ -> },
     /** Called (on the network thread) when a keyframe is needed: send VideoSubscribe.request_keyframe. */
     private val onKeyframeNeeded: () -> Unit,
 ) : AutoCloseable {
@@ -42,6 +48,7 @@ class VideoDecoder(
 
     /** One reassembled unit from mumble-core. */
     fun submit(unit: CoreVideoUnit) {
+        if (!running) return
         when (val result = assembler.push(unit)) {
             is FrameAssembler.Result.Frame -> if (!frames.offer(result)) {
                 // The decoder fell behind: start over from a fresh keyframe rather than build latency.
@@ -92,7 +99,9 @@ class VideoDecoder(
                         // Configure on the first keyframe, which carries the real dimensions.
                         if (!frame.isKeyframe) continue
                         decoder = MediaCodec.createDecoderByType(mime).apply {
-                            configure(MediaFormat.createVideoFormat(mime, frame.width, frame.height), target, null, 0)
+                            val width = frame.width.takeIf { it > 0 } ?: announcedWidth
+                            val height = frame.height.takeIf { it > 0 } ?: announcedHeight
+                            configure(MediaFormat.createVideoFormat(mime, width, height), target, null, 0)
                             start()
                         }
                     }
@@ -124,7 +133,12 @@ class VideoDecoder(
             val index = decoder.dequeueOutputBuffer(info, 0)
             if (index < 0) return // try again later, or a format/buffers change we need not act on
             // Render immediately: these are live frames, and pacing is the network's.
-            decoder.releaseOutputBuffer(index, info.size > 0)
+            val render = info.size > 0
+            decoder.releaseOutputBuffer(index, render)
+            if (render) {
+                val format = decoder.outputFormat
+                onFrame(format.getInteger(MediaFormat.KEY_WIDTH), format.getInteger(MediaFormat.KEY_HEIGHT))
+            }
         }
     }
 

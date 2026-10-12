@@ -12,6 +12,10 @@ import com.calegix.mumblevideo.client.audio.AudioCapture
 import com.calegix.mumblevideo.client.audio.AudioPlayback
 import com.calegix.mumblevideo.client.audio.AudioRouting
 import com.calegix.mumblevideo.client.crypto.OcbCrypt
+import com.calegix.mumblevideo.client.media.FrameCounter
+import com.calegix.mumblevideo.client.media.MediaEvents
+import com.calegix.mumblevideo.client.media.MumbleCoreMedia
+import com.calegix.mumblevideo.client.media.VideoDecoder
 import com.calegix.mumblevideo.client.net.ControlFraming
 import com.calegix.mumblevideo.client.net.ControlMessage
 import com.calegix.mumblevideo.client.net.ControlReader
@@ -47,6 +51,7 @@ import com.calegix.mumblevideo.core.Subscription
 import com.calegix.mumblevideo.core.TalkState
 import com.calegix.mumblevideo.core.UserBlob
 import com.calegix.mumblevideo.core.UserSession
+import com.calegix.mumblevideo.core.VideoCodec
 import com.calegix.mumblevideo.core.VideoStream
 import com.calegix.mumblevideo.core.VoiceInputMode
 import com.calegix.mumblevideo.core.VoiceState
@@ -344,6 +349,13 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         private val output: OutputStream = socket.outputStream.buffered()
         private val inbox = Channel<ControlMessage>(Channel.UNLIMITED)
         private val crypt = OcbCrypt()
+
+        /** mumble-core's media session: video decryption, reassembly and NACKs. Audio stays on [crypt]. */
+        private val media = MumbleCoreMedia()
+        private val decoders = ConcurrentHashMap<StreamKey, VideoDecoder>()
+        private val surfaces = ConcurrentHashMap<StreamKey, Surface>()
+        private val lastKeyframeAsk = ConcurrentHashMap<StreamKey, Long>()
+        private val frameCounters = ConcurrentHashMap<StreamKey, FrameCounter>()
         private var udp: UdpChannel? = null
 
         @Volatile private var capture: AudioCapture? = null
@@ -475,7 +487,11 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         private fun handle(message: ControlMessage, connected: Boolean): Outcome? {
             val p = message.payload
             when (message.type) {
-                ControlType.VERSION -> serverVersion = MumbleProto.Version.parseFrom(p)
+                ControlType.VERSION -> {
+                    val version = MumbleProto.Version.parseFrom(p)
+                    serverVersion = version
+                    if (version.hasVersionV2()) synchronized(media) { media.setServerVersion(version.versionV2) }
+                }
 
                 ControlType.REJECT -> {
                     val reject = MumbleProto.Reject.parseFrom(p)
@@ -530,13 +546,18 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 // The payload is the raw UDP plaintext, not a protobuf message.
                 ControlType.UDP_TUNNEL -> handleUdpPlaintext(p, tunnelled = true)
 
+                ControlType.VIDEO_SUBSCRIBE -> handleSubscribeEcho(MumbleProto.VideoSubscribe.parseFrom(p))
+
                 ControlType.VIDEO_STATE -> {
                     markVideoCapable("VideoState received")
                     val before = _videoStreams.value.map { it.key }.toSet()
                     _videoStreams.update { SessionReducer.videoState(it, MumbleProto.VideoState.parseFrom(p), self) }
                     val after = _videoStreams.value.map { it.key }.toSet()
                     (after - before).forEach { _events.tryEmit(CoreEvent.StreamStarted(it)) }
-                    (before - after).forEach { _events.tryEmit(CoreEvent.StreamEnded(it)) }
+                    (before - after).forEach {
+                        closeDecoder(it)
+                        _events.tryEmit(CoreEvent.StreamEnded(it))
+                    }
                 }
 
                 else -> Unit // CodecVersion, PermissionQuery, UserStats, ACL...: not needed yet
@@ -554,6 +575,9 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                             setup.serverNonce.toByteArray(),
                         )
                     }
+                    // The video crypt state is derived from the same key. Only full keys go to the
+                    // core: nonce resyncs concern audio, which Kotlin handles.
+                    synchronized(media) { media.handleCryptSetup(setup.toByteArray()) }
                     startUdp()
                 }
 
@@ -701,6 +725,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 server = InetSocketAddress(address, request.server.port),
                 crypt = crypt,
                 onPlaintext = { handleUdpPlaintext(it, tunnelled = false) },
+                onVideoDatagram = ::handleVideoDatagram,
                 onFramingLearned = { channelByte ->
                     // Only mumble-video servers frame UDP with a channel byte. v1.9.x servers have
                     // video but predate advertising it in ServerConfig, so this is the tell.
@@ -731,6 +756,10 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                             if (_connectionState.value is ConnectionState.Connected) publishConnected()
                         }
                     }
+                }
+
+                UdpChannel.TYPE_VIDEO -> if (tunnelled) {
+                    dispatchMedia(synchronized(media) { media.receiveTunnelled(plain) })
                 }
 
                 UdpChannel.TYPE_AUDIO -> {
@@ -876,6 +905,8 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         }
 
         private fun stopMedia() {
+            decoders.keys.toList().forEach(::closeDecoder)
+            synchronized(media) { media.close() }
             micRelease?.cancel()
             capture?.stop()
             capture = null
@@ -884,6 +915,100 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             udp?.close()
             udp = null
             routing.end()
+        }
+
+        // --- video ---------------------------------------------------------------------------------
+
+        private fun handleVideoDatagram(datagram: ByteArray) {
+            dispatchMedia(synchronized(media) { media.receiveDatagram(datagram, nowUsec = nowMicros()) })
+        }
+
+        private fun dispatchMedia(events: MediaEvents) {
+            events.video.forEach { unit ->
+                decoders[StreamKey(UserSession(unit.senderSession), unit.streamId)]?.submit(unit)
+            }
+            events.datagramsToSend.forEach { udp?.sendRaw(it) }
+            events.controlToSend.forEach { outbox.offer(it) }
+        }
+
+        fun subscribe(stream: VideoStream, preferredBandwidth: Int) {
+            val key = stream.key
+            if (stream.codec == VideoCodec.TiledImage) {
+                setSubscription(key, Subscription.Failed("Tiled-image streams aren't supported yet"))
+                return
+            }
+            decoders.getOrPut(key) {
+                VideoDecoder(
+                    codec = stream.codec,
+                    announcedWidth = stream.width,
+                    announcedHeight = stream.height,
+                    onFrame = { w, h -> onFrameRendered(key, w, h) },
+                    onKeyframeNeeded = { askKeyframe(key) },
+                ).also { decoder -> surfaces[key]?.let(decoder::setSurface) }
+            }
+            if (_videoStreams.value.firstOrNull { it.key == key }?.subscription !is Subscription.Active) {
+                setSubscription(key, Subscription.Pending)
+            }
+            sendSubscribe(key, subscribe = true, keyframe = true, bandwidth = preferredBandwidth)
+        }
+
+        fun unsubscribe(key: StreamKey) {
+            closeDecoder(key)
+            sendSubscribe(key, subscribe = false, keyframe = false, bandwidth = 0)
+            setSubscription(key, Subscription.None)
+        }
+
+        fun setSurface(key: StreamKey, surface: Surface?) {
+            if (surface == null) surfaces.remove(key) else surfaces[key] = surface
+            decoders[key]?.setSurface(surface)
+        }
+
+        private fun closeDecoder(key: StreamKey) {
+            decoders.remove(key)?.close()
+            frameCounters.remove(key)
+            lastKeyframeAsk.remove(key)
+        }
+
+        private fun sendSubscribe(key: StreamKey, subscribe: Boolean, keyframe: Boolean, bandwidth: Int) {
+            send(
+                ControlType.VIDEO_SUBSCRIBE,
+                MumbleProto.VideoSubscribe.newBuilder()
+                    .setSession(key.session.value)
+                    .setStreamId(key.streamId)
+                    .setSubscribe(subscribe)
+                    .setRequestKeyframe(keyframe)
+                    .setPreferredBandwidth(bandwidth)
+                    .build(),
+            )
+        }
+
+        /** The server relays keyframe requests at most once a second per sender; match that. */
+        private fun askKeyframe(key: StreamKey) {
+            val now = SystemClock.elapsedRealtime()
+            if (now - (lastKeyframeAsk[key] ?: 0L) < KEYFRAME_ASK_INTERVAL_MS || !decoders.containsKey(key)) return
+            lastKeyframeAsk[key] = now
+            sendSubscribe(key, subscribe = true, keyframe = true, bandwidth = 0)
+        }
+
+        /** The server echoes every subscribe; subscribe=false in the echo means it was refused. */
+        private fun handleSubscribeEcho(echo: MumbleProto.VideoSubscribe) {
+            val key = StreamKey(UserSession(echo.session), echo.streamId)
+            if (key.session == self) return // a viewer asking us for a keyframe; we don't send video yet
+            if (!echo.subscribe && decoders.containsKey(key)) {
+                closeDecoder(key)
+                setSubscription(key, Subscription.Failed("You don't have permission to watch this stream"))
+            }
+        }
+
+        private fun onFrameRendered(key: StreamKey, width: Int, height: Int) {
+            val fps = frameCounters.getOrPut(key) { FrameCounter() }.tick(SystemClock.elapsedRealtime()) ?: return
+            setSubscription(key, Subscription.Active(width, height, fps, lossPermille = 0))
+        }
+
+        private fun setSubscription(key: StreamKey, subscription: Subscription) {
+            _videoStreams.update { streams ->
+                streams.map { if (it.key == key) it.copy(subscription = subscription) else it }
+            }
         }
 
         suspend fun requestComment(session: UserSession): String? {
@@ -1065,34 +1190,20 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
     // ---------------------------------------------------------------------------------------------
 
     override suspend fun subscribe(stream: StreamKey, preferredBandwidth: Int) {
-        _videoStreams.update { streams ->
-            streams.map {
-                if (it.key ==
-                    stream
-                ) {
-                    it.copy(subscription = Subscription.Failed("Video playback isn't available in this build yet"))
-                } else {
-                    it
-                }
-            }
-        }
+        val l = requireLink()
+        val announced = _videoStreams.value.firstOrNull { it.key == stream }
+            ?: throw MumbleCoreException(Kind.InvalidArgument, "Unknown stream $stream")
+        withContext(Dispatchers.Default) { l.subscribe(announced, preferredBandwidth) }
     }
 
     override suspend fun unsubscribe(stream: StreamKey) {
-        _videoStreams.update { streams ->
-            streams.map {
-                if (it.key ==
-                    stream
-                ) {
-                    it.copy(subscription = Subscription.None)
-                } else {
-                    it
-                }
-            }
-        }
+        val l = link ?: return
+        withContext(Dispatchers.Default) { l.unsubscribe(stream) }
     }
 
-    override fun setVideoSurface(stream: StreamKey, surface: Surface?) = Unit
+    override fun setVideoSurface(stream: StreamKey, surface: Surface?) {
+        link?.setSurface(stream, surface)
+    }
 
     override suspend fun setStreamAudio(stream: StreamKey, volume: Float, muted: Boolean) {
         _videoStreams.update { streams ->
@@ -1149,6 +1260,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         const val PING_INTERVAL_MS = 5_000L
         const val MIC_RELEASE_DELAY_MS = 150L
         const val SERVER_SILENCE_LIMIT_MS = 35_000L
+        const val KEYFRAME_ASK_INTERVAL_MS = 1_000L
         const val TALK_TIMEOUT_MS = 300L
 
         // We speak the protocol of mumble-core's version: 1.7.0.

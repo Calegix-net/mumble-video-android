@@ -60,6 +60,15 @@ internal class UdpChannel(
         }
     }
 
+    /** Sends a datagram that is already framed and encrypted (mumble-core's video traffic). */
+    fun sendRaw(datagram: ByteArray) {
+        try {
+            socket.send(DatagramPacket(datagram, datagram.size))
+        } catch (e: IOException) {
+            Log.d(TAG, "udp send failed: ${e.message}")
+        }
+    }
+
     fun close() {
         running = false
         socket.close()
@@ -114,5 +123,6 @@ internal class UdpChannel(
         /** UDP plaintext message types (MumbleProtocol.h). */
         const val TYPE_AUDIO: Byte = 0
         const val TYPE_PING: Byte = 1
+        const val TYPE_VIDEO: Byte = 2
     }
 }
