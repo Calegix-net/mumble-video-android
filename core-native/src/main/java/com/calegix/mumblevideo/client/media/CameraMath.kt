@@ -56,6 +56,15 @@ internal object CameraMath {
         return ((sensorOrientation + signed) % 360 + 360) % 360
     }
 
+    /**
+     * The rotation the GL pass itself must apply. Camera2 already puts the sensor's mounting
+     * rotation into the SurfaceTexture transform (which is why a plain preview is upright in the
+     * device's natural orientation), so only the part for how the device is held remains. Applying
+     * [uprightRotation] in full on top of that transform turns the picture a quarter too far.
+     */
+    fun textureRotation(sensorOrientation: Int, displayRotation: Int, frontFacing: Boolean): Int =
+        ((uprightRotation(sensorOrientation, displayRotation, frontFacing) - sensorOrientation) % 360 + 360) % 360
+
     /** Size of the upright image: a quarter turn swaps the sides. */
     fun uprightSize(width: Int, height: Int, rotation: Int): Pair<Int, Int> =
         if (rotation % 180 == 0) width to height else height to width

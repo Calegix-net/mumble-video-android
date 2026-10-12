@@ -1332,6 +1332,8 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         val l = requireLink()
         val announced = _videoStreams.value.firstOrNull { it.key == stream }
             ?: throw MumbleCoreException(Kind.InvalidArgument, "Unknown stream $stream")
+        // Our own stream is shown from the camera directly; the server refuses (rightly) to relay it back.
+        if (announced.isLocal) return
         withContext(Dispatchers.Default) { l.subscribe(announced, preferredBandwidth) }
     }
 

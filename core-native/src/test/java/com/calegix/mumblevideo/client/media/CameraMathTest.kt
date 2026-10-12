@@ -67,4 +67,14 @@ class CameraMathTest {
         assertEquals(1f to 0f, apply(mirrored, 0f, 0f))
         assertEquals(0f to 1f, apply(mirrored, 1f, 1f))
     }
+
+    @Test
+    fun `the texture adds only the device rotation, since the transform carries the sensor's`() {
+        // Phone upright: the transform already makes the picture upright, nothing to add.
+        assertEquals(0, CameraMath.textureRotation(sensorOrientation = 90, displayRotation = 0, frontFacing = false))
+        assertEquals(0, CameraMath.textureRotation(sensorOrientation = 270, displayRotation = 0, frontFacing = true))
+        // Turned to landscape: a quarter turn, but the output is still sized by the full rotation.
+        assertEquals(270, CameraMath.textureRotation(sensorOrientation = 90, displayRotation = 90, frontFacing = false))
+        assertEquals(1280 to 720, CameraMath.uprightSize(1280, 720, CameraMath.uprightRotation(90, 90, false)))
+    }
 }
