@@ -1,5 +1,7 @@
 package com.calegix.mumblevideo.ui.session
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -30,6 +32,8 @@ import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -45,17 +49,21 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.fromHtml
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import com.calegix.mumblevideo.core.MessageTarget
 import java.text.DateFormat
 import java.util.Date
@@ -178,6 +186,25 @@ private fun Composer(
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         uri?.let(onSendImage)
     }
+    // The system camera app writes the photo to a file of ours, shared with it for that one shot.
+    val context = LocalContext.current
+    var pendingPhoto by rememberSaveable { mutableStateOf<String?>(null) }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
+        val uri = pendingPhoto?.toUri()
+        pendingPhoto = null
+        if (taken && uri != null) onSendImage(uri)
+    }
+    val launchCamera = {
+        val uri = ChatPhotos.newCaptureUri(context)
+        pendingPhoto = uri.toString()
+        camera.launch(uri)
+    }
+    // We declare CAMERA (for video), and an app that declares it may only start the camera app
+    // once it holds it.
+    val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) launchCamera()
+    }
+    var photoMenu by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(8.dp)) {
         Box {
             AssistChip(
@@ -205,14 +232,33 @@ private fun Composer(
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(
-                onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                enabled = !state.sendingImage,
-            ) {
-                if (state.sendingImage) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Outlined.AddPhotoAlternate, contentDescription = "Send a picture")
+            Box {
+                IconButton(onClick = { photoMenu = true }, enabled = !state.sendingImage) {
+                    if (state.sendingImage) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Outlined.AddPhotoAlternate, contentDescription = "Send a picture")
+                    }
+                }
+                DropdownMenu(expanded = photoMenu, onDismissRequest = { photoMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Take photo") },
+                        leadingIcon = { Icon(Icons.Outlined.PhotoCamera, contentDescription = null) },
+                        onClick = {
+                            photoMenu = false
+                            val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                                PackageManager.PERMISSION_GRANTED
+                            if (granted) launchCamera() else cameraPermission.launch(Manifest.permission.CAMERA)
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Choose photo") },
+                        leadingIcon = { Icon(Icons.Outlined.PhotoLibrary, contentDescription = null) },
+                        onClick = {
+                            photoMenu = false
+                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                    )
                 }
             }
             OutlinedTextField(

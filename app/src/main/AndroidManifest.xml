@@ -62,5 +62,15 @@
             android:name=".service.ConnectionService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback|microphone|camera|mediaProjection" />
+        <!-- Photos taken for chat: the camera app writes into our cache through this. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.photos"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/chat_photos" />
+        </provider>
     </application>
 </manifest>
