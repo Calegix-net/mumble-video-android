@@ -120,6 +120,10 @@ class ScreenStreamer(
         }
         Log.i(TAG, "screen turned: now ${width}x$height")
         onReshaped(width, height)
+        // Viewers subscribe to the new stream a round trip after the announcement, so the encoder's
+        // opening keyframe has usually gone by then. Offer a few more instead of waiting for them to
+        // ask (the server relays one request a second) or for the next periodic one.
+        RESHAPE_KEYFRAMES_MS.forEach { delay -> handler.postDelayed({ if (!closed) requestKeyframe() }, delay) }
     }
 
     /** A running encoder at [width]x[height]; returns its input surface. */
@@ -235,6 +239,7 @@ class ScreenStreamer(
     companion object {
         private const val TAG = "MvScreen"
         private const val KEYFRAME_INTERVAL_SECONDS = 3
+        private val RESHAPE_KEYFRAMES_MS = longArrayOf(150, 350, 700)
 
         /** The screen's shape, scaled so the longer side is at most [longest], both sides multiples of 16. */
         internal fun streamSize(screenWidth: Int, screenHeight: Int, longest: Int): Pair<Int, Int> {
