@@ -15,10 +15,17 @@ object ChatImages {
     /** Mumble's default `imagemessagelength`, used when the server does not say. */
     const val DEFAULT_LIMIT = 131_072
 
-    private val IMG =
+    /** Any `<img>` tag. Whatever it holds, it must not reach the HTML renderer, which shows an object box. */
+    private val IMG = Regex("""<img\b[^>]*>""", RegexOption.IGNORE_CASE)
+
+    /** The src attribute: double-quoted, single-quoted or bare, as different clients and Qt versions write it. */
+    private val SRC = Regex("""\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", RegexOption.IGNORE_CASE)
+
+    /** `data:image/<type>[;params];base64,<payload>`, parameters such as charset or name allowed. */
+    private val DATA_URI =
         Regex(
-            """<img\b[^>]*?\bsrc\s*=\s*["']data:image/[a-zA-Z+.-]+;base64,([A-Za-z0-9+/=\s]+)["'][^>]*>""",
-            RegexOption.IGNORE_CASE,
+            """^data:image/[^;,]+(?:;[^,]*)?;base64,(.*)$""",
+            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
         )
 
     /** A piece of a received message: markup to render as text, or an embedded image. */
@@ -35,14 +42,63 @@ object ChatImages {
         for (match in IMG.findAll(html)) {
             val before = html.substring(last, match.range.first)
             if (before.isNotBlank()) parts += Part.Html(before)
-            val bytes = runCatching { Base64.decode(match.groupValues[1], Base64.DEFAULT) }.getOrNull()
-            if (bytes != null) parts += Part.Image(bytes)
+            parts += imagePart(match.value)
             last = match.range.last + 1
         }
         val rest = html.substring(last)
         if (rest.isNotBlank()) parts += Part.Html(rest)
         return parts
     }
+
+    private fun imagePart(tag: String): Part {
+        val src = SRC.find(tag)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }?.let(::unescape)
+            ?: return Part.Html("[picture]")
+        DATA_URI.find(src)?.let { data ->
+            // Payloads arrive line-wrapped, with entity-encoded newlines, or percent-encoded.
+            val payload = percentDecode(data.groupValues[1]).filterNot { it.isWhitespace() }
+            val bytes = runCatching { java.util.Base64.getMimeDecoder().decode(payload) }.getOrNull()
+            return if (bytes != null && bytes.isNotEmpty()) Part.Image(bytes) else Part.Html("[unreadable picture]")
+        }
+        // A picture by address. Not fetched, as in the desktop client: that would tell its host who
+        // is reading. Shown as a link instead.
+        if (src.startsWith("http://", ignoreCase = true) || src.startsWith("https://", ignoreCase = true)) {
+            val safe = src.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;")
+            return Part.Html("<a href=\"$safe\">picture: $safe</a>")
+        }
+        return Part.Html("[picture]")
+    }
+
+    /** %2B and friends only; unlike URLDecoder, a literal + stays a + (base64 needs it). */
+    private fun percentDecode(value: String): String {
+        if ('%' !in value) return value
+        val out = StringBuilder(value.length)
+        var i = 0
+        while (i < value.length) {
+            val hex = if (value[i] == '%' &&
+                i + 2 < value.length
+            ) {
+                value.substring(i + 1, i + 3).toIntOrNull(16)
+            } else {
+                null
+            }
+            if (hex != null) {
+                out.append(hex.toChar())
+                i += 3
+            } else {
+                out.append(value[i++])
+            }
+        }
+        return out.toString()
+    }
+
+    private fun unescape(value: String): String = value
+        .replace("&#10;", "\n")
+        .replace("&#13;", "\r")
+        .replace("&#43;", "+")
+        .replace("&#47;", "/")
+        .replace("&#61;", "=")
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&")
 
     /**
      * Encodes [bitmap] as a JPEG `<img>` message no longer than [limit] characters, shrinking the
