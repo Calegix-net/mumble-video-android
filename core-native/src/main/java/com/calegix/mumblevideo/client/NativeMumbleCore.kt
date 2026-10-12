@@ -496,6 +496,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 ControlType.UDP_TUNNEL -> handleUdpPlaintext(p, tunnelled = true)
 
                 ControlType.VIDEO_STATE -> {
+                    markVideoCapable("VideoState received")
                     val before = _videoStreams.value.map { it.key }.toSet()
                     _videoStreams.update { SessionReducer.videoState(it, MumbleProto.VideoState.parseFrom(p), self) }
                     val after = _videoStreams.value.map { it.key }.toSet()
@@ -534,6 +535,12 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             }
         }
 
+        private fun markVideoCapable(why: String) {
+            if (_capabilities.value.video) return
+            Log.i(TAG, "server has video ($why)")
+            _capabilities.update { it.copy(video = true) }
+        }
+
         private fun handleServerSync(sync: MumbleProto.ServerSync) {
             self = UserSession(sync.session)
             welcome = sync.welcomeText
@@ -557,7 +564,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             val video = MumbleProto.Feature.FEATURE_VIDEO in config.featuresList
             _capabilities.update {
                 it.copy(
-                    video = video,
+                    video = video || it.video,
                     fileTransfer = MumbleProto.Feature.FEATURE_FILE_TRANSFER in config.featuresList,
                     maxAudioBandwidth = if (config.hasMaxBandwidth()) config.maxBandwidth else it.maxAudioBandwidth,
                     maxVideoBandwidth = config.maxVideoBandwidth,
@@ -658,6 +665,11 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 server = InetSocketAddress(address, request.server.port),
                 crypt = crypt,
                 onPlaintext = { handleUdpPlaintext(it, tunnelled = false) },
+                onFramingLearned = { channelByte ->
+                    // Only mumble-video servers frame UDP with a channel byte. v1.9.x servers have
+                    // video but predate advertising it in ServerConfig, so this is the tell.
+                    if (channelByte) markVideoCapable("UDP channel byte")
+                },
             ).also {
                 it.channelByte = true
                 it.start()

@@ -23,8 +23,12 @@ internal class UdpChannel(
     private val crypt: OcbCrypt,
     private val onPlaintext: (ByteArray) -> Unit,
     private val onVideoDatagram: (ByteArray) -> Unit = {},
+    /** Called once, when the first datagram decrypts: true if the server uses the channel byte. */
+    private val onFramingLearned: (channelByte: Boolean) -> Unit = {},
 ) {
     @Volatile var channelByte = true
+
+    private var framingLearned = false
 
     @Volatile var badPackets = 0L
         private set
@@ -91,6 +95,10 @@ internal class UdpChannel(
                         badPackets++
                     } else {
                         channelByte = framed != null
+                        if (!framingLearned) {
+                            framingLearned = true
+                            onFramingLearned(channelByte)
+                        }
                         onPlaintext(plain)
                     }
                 }
