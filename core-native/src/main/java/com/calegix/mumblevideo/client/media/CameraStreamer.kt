@@ -68,6 +68,12 @@ class CameraStreamer(
         val bitrate: Int,
         val codec: VideoCodec = VideoCodec.VP8,
         val keyframeIntervalSeconds: Int = 2,
+        /**
+         * How the device is physically held, clockwise degrees from its natural orientation
+         * (OrientationEventListener, quantised). Null uses the display's rotation, which stays put
+         * when auto-rotate is off or the app is in the background.
+         */
+        val deviceOrientation: Int? = null,
     )
 
     class EncodedFrame(
@@ -138,13 +144,13 @@ class CameraStreamer(
         val (captureWidth, captureHeight) = CameraMath.chooseSize(sizes, config.width, config.height)
         val front = characteristics[CameraCharacteristics.LENS_FACING] == CameraCharacteristics.LENS_FACING_FRONT
         val sensor = characteristics[CameraCharacteristics.SENSOR_ORIENTATION] ?: 0
-        val rotation = CameraMath.uprightRotation(sensor, displayRotationDegrees(), front)
+        val rotation = CameraMath.uprightRotation(sensor, effectiveDisplayRotation(), front)
         val (uprightWidth, uprightHeight) = CameraMath.uprightSize(captureWidth, captureHeight, rotation)
         val (encodeWidth, encodeHeight) = CameraMath.encoderSize(uprightWidth, uprightHeight)
         outputWidth = encodeWidth
         outputHeight = encodeHeight
         // The sizes follow the full upright rotation; the texture only needs what the transform lacks.
-        val textureRotation = CameraMath.textureRotation(sensor, displayRotationDegrees(), front)
+        val textureRotation = CameraMath.textureRotation(sensor, effectiveDisplayRotation(), front)
         encodedOrientation = CameraMath.texMatrix(textureRotation, mirror = false)
         previewOrientation = CameraMath.texMatrix(textureRotation, mirror = front)
         val fpsRanges = characteristics[CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES].orEmpty()
@@ -421,6 +427,10 @@ class CameraStreamer(
         done.await(RENDER_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         return failure
     }
+
+    /** The display rotation the device's physical orientation corresponds to, if known. */
+    private fun effectiveDisplayRotation(): Int =
+        config.deviceOrientation?.let { (360 - it) % 360 } ?: displayRotationDegrees()
 
     private fun displayRotationDegrees(): Int {
         val display = appContext.getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)

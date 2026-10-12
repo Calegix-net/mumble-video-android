@@ -4,12 +4,14 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.display.DisplayManager
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.SystemClock
 import android.util.Log
+import android.view.Display
 import android.view.Surface
 import com.calegix.mumblevideo.client.audio.AudioCapture
 import com.calegix.mumblevideo.client.audio.AudioPlayback
@@ -19,6 +21,7 @@ import com.calegix.mumblevideo.client.media.CameraStreamer
 import com.calegix.mumblevideo.client.media.FrameCounter
 import com.calegix.mumblevideo.client.media.MediaEvents
 import com.calegix.mumblevideo.client.media.MumbleCoreMedia
+import com.calegix.mumblevideo.client.media.OrientationTracker
 import com.calegix.mumblevideo.client.media.ScreenStreamer
 import com.calegix.mumblevideo.client.media.VideoDecoder
 import com.calegix.mumblevideo.client.net.ControlFraming
@@ -1041,9 +1044,11 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
 
         @Volatile private var cameraKey: StreamKey? = null
 
-        fun startCamera(request: CameraRequest, option: CameraOption) {
+        private var orientation: OrientationTracker? = null
+
+        fun startCamera(request: CameraRequest, option: CameraOption, deviceOrientation: Int? = null) {
             val me = self ?: throw MumbleCoreException(Kind.NotConnected, "Not synchronised yet")
-            stopCamera()
+            stopCamera(keepOrientation = true)
             val streamId = nextStreamId++
             val key = StreamKey(me, streamId)
             val (width, height) = request.width to request.height
@@ -1057,6 +1062,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                     framerate = request.framerate,
                     bitrate = sendBitrate(request.maxBandwidth, width, height),
                     codec = codec,
+                    deviceOrientation = deviceOrientation,
                 ),
                 onFrame = { frame -> sendVideoFrame(streamId, frame) },
                 onError = { reason ->
@@ -1073,6 +1079,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             }
             camera = streamer
             cameraKey = key
+            followOrientation(request, option, deviceOrientation)
             surfaces[key]?.let(streamer::setPreview)
             val sent = streamer.outputWidth to streamer.outputHeight
             send(
@@ -1229,12 +1236,46 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             _videoStreams.update { streams -> streams.filterNot { it.key == key } }
         }
 
-        fun stopCamera(announce: Boolean = true) {
+        /**
+         * Turning the phone changes the picture's shape, which the protocol carries as a new stream
+         * (a size change must take a new stream id). So once the phone has settled in a new
+         * orientation, the camera restarts as a new stream, upright again.
+         */
+        private fun followOrientation(request: CameraRequest, option: CameraOption, current: Int?) {
+            if (orientation != null) return
+            orientation = OrientationTracker(context) { turned ->
+                scope.launch(Dispatchers.Default) {
+                    if (camera == null) return@launch
+                    Log.i(TAG, "phone turned to $turned°: restarting the camera upright")
+                    runCatching { startCamera(request, option, turned) }
+                        .onFailure { Log.w(TAG, "camera restart failed", it) }
+                }
+            }.also { it.start(current ?: orientationFromDisplay()) }
+        }
+
+        /** The physical orientation the display's current rotation implies, as a starting point. */
+        private fun orientationFromDisplay(): Int {
+            val rotation = context.getSystemService(DisplayManager::class.java)
+                ?.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: Surface.ROTATION_0
+            val degrees = when (rotation) {
+                Surface.ROTATION_90 -> 90
+                Surface.ROTATION_180 -> 180
+                Surface.ROTATION_270 -> 270
+                else -> 0
+            }
+            return (360 - degrees) % 360
+        }
+
+        fun stopCamera(announce: Boolean = true, keepOrientation: Boolean = false) {
             val streamer = camera ?: return
             val key = cameraKey
             camera = null
             cameraKey = null
             streamer.close()
+            if (!keepOrientation) {
+                orientation?.stop()
+                orientation = null
+            }
             if (key != null) {
                 if (announce) {
                     send(
