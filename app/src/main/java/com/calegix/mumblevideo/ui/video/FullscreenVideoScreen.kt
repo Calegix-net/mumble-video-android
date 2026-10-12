@@ -46,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.calegix.mumblevideo.core.StreamKey
 import com.calegix.mumblevideo.core.Subscription
+import com.calegix.mumblevideo.core.VideoSourceKind
 import com.calegix.mumblevideo.ui.AppViewModelProvider
 import kotlinx.coroutines.delay
 
@@ -58,15 +59,31 @@ fun FullscreenVideoScreen(
     viewModel: VideoViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val tile = state.tiles.firstOrNull { it.stream.key == stream }
-    // The stream ended while we were watching it.
+    // Senders restart a stream under a new id when its size changes (a phone turning, a window
+    // resized), announcing the new one before ending the old. Follow it rather than closing.
+    var current by remember { mutableStateOf(stream) }
+    var kind by remember { mutableStateOf<VideoSourceKind?>(null) }
+    val tile = state.tiles.firstOrNull { it.stream.key == current }
+    if (tile != null) kind = tile.stream.sourceKind
+    val successor = if (tile == null) {
+        state.tiles.firstOrNull { it.stream.key.session == current.session && it.stream.sourceKind == kind }
+    } else {
+        null
+    }
+    LaunchedEffect(successor) { successor?.let { current = it.stream.key } }
+    // The stream ended while we were watching it, with nothing to replace it.
     val currentOnBack by rememberUpdatedState(onBack)
-    val ended = tile == null && state.tiles.isNotEmpty()
-    LaunchedEffect(ended) { if (ended) currentOnBack() }
+    val ended = tile == null && successor == null && state.tiles.isNotEmpty()
+    LaunchedEffect(ended) {
+        if (ended) {
+            delay(REPLACEMENT_GRACE_MS)
+            currentOnBack()
+        }
+    }
 
-    DisposableEffect(stream) {
-        viewModel.acquire(stream, thumbnail = false)
-        onDispose { viewModel.release(stream) }
+    DisposableEffect(current) {
+        viewModel.acquire(current, thumbnail = false)
+        onDispose { viewModel.release(current) }
     }
     var overlay by rememberSaveable { mutableStateOf(true) }
     // Pinch out to fill the screen (cropping), pinch in for the whole picture, as in YouTube.
@@ -113,7 +130,7 @@ fun FullscreenVideoScreen(
         val aspect =
             tile?.stream?.takeIf { it.width > 0 && it.height > 0 }?.let { it.width.toFloat() / it.height } ?: (16f / 9f)
         VideoSurface(
-            stream,
+            current,
             viewModel::attachSurface,
             viewModel::detachSurface,
             (tile?.stream?.let(::streamAspect) ?: aspect).let { shape ->
@@ -161,7 +178,7 @@ fun FullscreenVideoScreen(
                     ShareAudioControls(
                         volume = audio.volume,
                         muted = audio.muted,
-                        onChange = { volume, muted -> viewModel.setStreamAudio(stream, volume, muted) },
+                        onChange = { volume, muted -> viewModel.setStreamAudio(current, volume, muted) },
                     )
                 }
             }
@@ -170,6 +187,7 @@ fun FullscreenVideoScreen(
 }
 
 private const val PINCH_THRESHOLD = 1.15f
+private const val REPLACEMENT_GRACE_MS = 2000L
 private const val ZOOM_HINT_MS = 1200L
 
 @Composable
