@@ -65,6 +65,20 @@ jobs:
           path: out/
           if-no-files-found: error
 
+      # Every build of main replaces the "latest" pre-release, so there is always one link to the
+      # newest APK; v* tags get a release of their own that stays.
+      - name: Publish latest build
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --cleanup-tag --yes 2>/dev/null || true
+          cp out/*.apk out/mumble-video-android.apk
+          (cd out && sha256sum *.apk > SHA256SUMS)
+          gh release create latest out/* --prerelease --target "$GITHUB_SHA" \
+            --title "Latest build (${GITHUB_SHA::7})" \
+            --notes "Built from ${GITHUB_SHA::7} on main. Development build; installs over earlier ones."
+
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
