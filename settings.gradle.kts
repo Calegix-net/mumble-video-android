@@ -25,4 +25,5 @@ rootProject.name = "mumble-video-android"
 include(":app")
 include(":core-api")
 include(":core-fake")
-// :core-native (the JNI binding to the C++ core) slots in here once the core exists.
+include(":core-proto")
+include(":core-native")

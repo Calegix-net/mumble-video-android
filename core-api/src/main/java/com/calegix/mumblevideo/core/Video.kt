@@ -1,7 +1,15 @@
 package com.calegix.mumblevideo.core
 
 /** Picture codecs from `VideoState.Codec`. `OpusAudio` is not here: see [VideoStream.audio]. */
-enum class VideoCodec { TiledImage, VP8, VP9, AV1 }
+enum class VideoCodec {
+    TiledImage,
+    VP8,
+    VP9,
+    AV1,
+
+    /** Annex B from a hardware encoder; a frame may span several units, which the core joins. */
+    H264,
+}
 
 /** `VideoState.SourceKind`. */
 enum class VideoSourceKind {

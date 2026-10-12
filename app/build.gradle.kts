@@ -44,6 +44,13 @@ android {
         unitTests.isReturnDefaultValues = true
     }
 
+    packaging {
+        resources {
+            // BouncyCastle's jars each carry the same licence and OSGi metadata.
+            excludes += setOf("META-INF/LICENSE.md", "META-INF/NOTICE.md", "META-INF/versions/9/OSGI-INF/MANIFEST.MF")
+        }
+    }
+
     lint {
         warningsAsErrors = false
         abortOnError = true
@@ -60,7 +67,8 @@ ksp {
 
 dependencies {
     implementation(project(":core-api"))
-    // Swapped for :core-native once the C++ core lands; only AppContainer refers to it.
+    implementation(project(":core-native"))
+    // The scripted fake server: Settings > Advanced > Use simulated server, and the tests.
     implementation(project(":core-fake"))
 
     implementation(libs.androidx.core.ktx)

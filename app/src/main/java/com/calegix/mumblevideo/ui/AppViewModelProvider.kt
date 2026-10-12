@@ -21,7 +21,7 @@ object AppViewModelProvider {
         initializer { ServerListViewModel(container().servers, container().session) }
         initializer { PublicServersViewModel(container().publicServers, container().servers) }
         initializer { SessionViewModel(container().session, container().settings) }
-        initializer { ChatViewModel(container().session) }
+        initializer { ChatViewModel(container().session, container().settings) }
         initializer { VideoViewModel(container().session, container().settings) }
         initializer { SettingsViewModel(container().settings, container().core, container().trustStore) }
         initializer {

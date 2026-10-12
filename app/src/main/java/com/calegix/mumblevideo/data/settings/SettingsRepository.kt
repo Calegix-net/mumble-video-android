@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.serialization.SerializationException
@@ -24,6 +25,9 @@ interface SettingsRepository {
     val settings: StateFlow<AppSettings>
 
     suspend fun update(transform: (AppSettings) -> AppSettings)
+
+    /** The stored settings, waiting for the first read from disk if needed. */
+    suspend fun load(): AppSettings
 }
 
 class DataStoreSettingsRepository(
@@ -37,6 +41,8 @@ class DataStoreSettingsRepository(
     override suspend fun update(transform: (AppSettings) -> AppSettings) {
         store.updateData(transform)
     }
+
+    override suspend fun load(): AppSettings = store.data.first()
 
     companion object {
         fun create(context: Context, scope: CoroutineScope): DataStoreSettingsRepository {
@@ -81,4 +87,6 @@ class InMemorySettingsRepository(initial: AppSettings = AppSettings()) : Setting
     override suspend fun update(transform: (AppSettings) -> AppSettings) {
         state.update(transform)
     }
+
+    override suspend fun load(): AppSettings = state.value
 }

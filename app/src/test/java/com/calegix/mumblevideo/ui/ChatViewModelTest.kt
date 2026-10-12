@@ -18,7 +18,7 @@ class ChatViewModelTest {
     @Test
     fun `sending to the current channel escapes markup and clears the draft`() = runTest {
         val graph = TestGraph(this)
-        val vm = ChatViewModel(graph.session)
+        val vm = ChatViewModel(graph.session, graph.settings)
         keepCollecting(vm.uiState)
         with(graph) { connect() }
 
@@ -38,7 +38,7 @@ class ChatViewModelTest {
     @Test
     fun `private message target is labelled and offered`() = runTest {
         val graph = TestGraph(this)
-        val vm = ChatViewModel(graph.session)
+        val vm = ChatViewModel(graph.session, graph.settings)
         keepCollecting(vm.uiState)
         with(graph) { connect() }
 
@@ -56,7 +56,7 @@ class ChatViewModelTest {
     @Test
     fun `blank drafts are not sent and clear empties history`() = runTest {
         val graph = TestGraph(this)
-        val vm = ChatViewModel(graph.session)
+        val vm = ChatViewModel(graph.session, graph.settings)
         keepCollecting(vm.uiState)
         with(graph) { connect() }
 
@@ -71,6 +71,27 @@ class ChatViewModelTest {
         vm.clear()
         settle()
         assertTrue(vm.uiState.value.entries.isEmpty())
+    }
+
+    @Test
+    fun `images go out as their own message to the current target, within the server's limit`() = runTest {
+        val graph = TestGraph(this)
+        val vm = ChatViewModel(graph.session, graph.settings)
+        keepCollecting(vm.uiState)
+        with(graph) { connect() }
+
+        var limitSeen = -1
+        vm.sendImage { limit ->
+            limitSeen = limit
+            "<img src=\"data:image/jpeg;base64,AAAA\"/>"
+        }
+        settle()
+        assertEquals(131_072, limitSeen)
+        assertTrue(vm.uiState.value.entries.single().message.html.startsWith("<img"))
+
+        vm.sendImage { null }
+        settle()
+        assertTrue(vm.uiState.value.error!!.contains("too large"))
     }
 
     @Test

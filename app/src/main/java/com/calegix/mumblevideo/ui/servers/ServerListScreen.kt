@@ -109,6 +109,10 @@ fun ServerListScreen(
             val wanted = buildList {
                 add(Manifest.permission.RECORD_AUDIO)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+                // Android 17 blocks apps from the local network without this; ask only when it matters.
+                if (Build.VERSION.SDK_INT >= 37 && LocalNetwork.isLocal(connectRequest!!.host)) {
+                    add(Manifest.permission.ACCESS_LOCAL_NETWORK)
+                }
             }
             permissions.launch(wanted.toTypedArray())
         }

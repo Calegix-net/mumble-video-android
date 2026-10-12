@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization) apply false
     alias(libs.plugins.ksp) apply false
     alias(libs.plugins.ktlint) apply false
+    alias(libs.plugins.protobuf) apply false
 }
 
 subprojects {
@@ -22,6 +23,7 @@ subprojects {
         android.set(true)
         filter {
             exclude { it.file.path.contains("/build/") }
+            exclude { it.file.path.contains("/generated/") }
         }
     }
 

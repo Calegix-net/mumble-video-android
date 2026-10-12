@@ -1,6 +1,7 @@
 package com.calegix.mumblevideo
 
 import android.content.Context
+import com.calegix.mumblevideo.client.NativeMumbleCore
 import com.calegix.mumblevideo.core.MumbleCore
 import com.calegix.mumblevideo.core.fake.FakeMumbleCore
 import com.calegix.mumblevideo.data.certificates.CertificateRepository
@@ -22,6 +23,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
  * Manual dependency injection: one instance per process, built in [MumbleVideoApp]. Small
@@ -33,16 +35,18 @@ class AppContainer(context: Context) {
     /** Process-wide scope on the main thread; the core does its own threading. */
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    private val database = AppDatabase.create(appContext)
-
-    // The one line that changes when :core-native arrives.
-    private val fakeCore = FakeMumbleCore()
-    val core: MumbleCore = fakeCore
-
     val settings: SettingsRepository = DataStoreSettingsRepository.create(
         appContext,
         CoroutineScope(SupervisorJob() + Dispatchers.IO),
     )
+
+    // Which core runs is fixed for the life of the process. Reading one small file at startup is
+    // the price of never having to hot-swap a live connection.
+    private val simulated = runBlocking { settings.load().useSimulatedCore }
+    private val fakeCore = if (simulated) FakeMumbleCore() else null
+    val core: MumbleCore = fakeCore ?: NativeMumbleCore(appContext)
+
+    private val database = AppDatabase.create(appContext, seedExamples = simulated)
     val servers: ServerRepository = RoomServerRepository(database.servers())
     val trustStore: TrustStore = RoomTrustStore(database.trustedCertificates())
     val certificates: CertificateRepository =
@@ -60,8 +64,8 @@ class AppContainer(context: Context) {
     )
 
     init {
-        appScope.launch {
-            settings.settings.collect { fakeCore.simulateConnectionDrops = it.simulateConnectionDrops }
+        fakeCore?.let { fake ->
+            appScope.launch { settings.settings.collect { fake.simulateConnectionDrops = it.simulateConnectionDrops } }
         }
         MessageNotifier(appContext, session, settings, appScope).start()
     }

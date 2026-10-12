@@ -19,17 +19,15 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun trustedCertificates(): TrustedCertificateDao
 
     companion object {
-        fun create(context: Context): AppDatabase =
+        /** [seedExamples] fills a fresh list with the fake core's scripted servers. */
+        fun create(context: Context, seedExamples: Boolean): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "mumble-video.db")
-                .addCallback(SeedServers)
+                .apply { if (seedExamples) addCallback(SeedServers) }
                 .build()
     }
 }
 
-/**
- * Seeds the server list on first launch with servers that exercise the fake core's scripted
- * behaviours. Drop this when :core-native replaces :core-fake.
- */
+/** Servers that exercise the fake core's scripted behaviours, for a first run on the simulated core. */
 private object SeedServers : RoomDatabase.Callback() {
     override fun onCreate(db: SupportSQLiteDatabase) {
         val seeds = listOf(

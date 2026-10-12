@@ -17,7 +17,8 @@ Actions:
     dump            print visible texts and descriptions
     adb:ARGS        run `adb shell ARGS`
 
-ANDROID_SERIAL selects the device.
+ANDROID_SERIAL selects the device. Only this app's own nodes are ever read or tapped (plus the
+system permission dialog), so the driver cannot act on, or print, anything else on a real phone.
 """
 
 import os
@@ -29,6 +30,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHOTS = os.path.join(ROOT, "docs", "screenshots")
+PACKAGES = ("com.calegix.mumblevideo", "com.google.android.permissioncontroller", "com.android.permissioncontroller")
 
 
 def adb(*args, binary=False):
@@ -41,7 +43,7 @@ def nodes():
         try:
             adb("shell", "uiautomator", "dump", "/sdcard/ui.xml")
             xml = adb("exec-out", "cat", "/sdcard/ui.xml")
-            return list(ET.fromstring(xml).iter("node"))
+            return [n for n in ET.fromstring(xml).iter("node") if (n.get("package") or "").startswith(PACKAGES)]
         except (subprocess.CalledProcessError, ET.ParseError):
             time.sleep(1)
     raise RuntimeError("uiautomator dump kept failing")
@@ -85,6 +87,8 @@ def main(actions):
             find(arg, exact=False, timeout=30)
         elif verb == "shot":
             time.sleep(0.6)
+            if not any((n.get("package") or "").startswith(PACKAGES[0]) for n in nodes()):
+                raise RuntimeError("the app is not in front; not taking a screenshot of something else")
             with open(os.path.join(SHOTS, f"{arg}.png"), "wb") as f:
                 f.write(adb("exec-out", "screencap", "-p", binary=True))
             print(f"saved {arg}.png")

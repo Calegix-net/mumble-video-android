@@ -1,5 +1,11 @@
 package com.calegix.mumblevideo.ui.session
 
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,8 +14,10 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,13 +27,16 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -37,6 +48,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.fromHtml
 import androidx.compose.ui.text.input.ImeAction
@@ -53,6 +67,7 @@ fun ChatPane(
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onSelectTarget: (MessageTarget?) -> Unit,
+    onSendImage: (Uri) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -84,22 +99,22 @@ fun ChatPane(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             ) {
-                items(state.entries, key = { it.message.id }) { MessageBubble(it) }
+                items(state.entries, key = { it.message.id }) { MessageBubble(it, state.loadImages) }
             }
         }
-        Composer(state, draft, onDraftChange, onSend, onSelectTarget)
+        Composer(state, draft, onDraftChange, onSend, onSelectTarget, onSendImage)
     }
 }
 
 @Composable
-private fun MessageBubble(entry: ChatEntry) {
+private fun MessageBubble(entry: ChatEntry, loadImages: Boolean) {
     val message = entry.message
     val own = message.isOwn
     val private = message.target is MessageTarget.ToUser
     val time = remember(message.timestampEpochMillis) {
         DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(message.timestampEpochMillis))
     }
-    val body = remember(message.html) { AnnotatedString.fromHtml(message.html) }
+    val parts = remember(message.html) { ChatImages.split(message.html) }
     val scheme = MaterialTheme.colorScheme
     val (container, content) = when {
         own -> scheme.primaryContainer to scheme.onPrimaryContainer
@@ -121,7 +136,24 @@ private fun MessageBubble(entry: ChatEntry) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(body, style = MaterialTheme.typography.bodyLarge, color = content)
+            parts.forEach { part ->
+                when (part) {
+                    is ChatImages.Part.Html -> {
+                        val text = remember(part) { AnnotatedString.fromHtml(part.html) }
+                        Text(text, style = MaterialTheme.typography.bodyLarge, color = content)
+                    }
+
+                    is ChatImages.Part.Image -> if (loadImages) {
+                        ChatImage(part.bytes, "Picture from ${if (own) "you" else message.senderName}")
+                    } else {
+                        Text(
+                            "Picture hidden (Settings › General › Load images)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = secondary,
+                        )
+                    }
+                }
+            }
             Text(
                 time,
                 style = MaterialTheme.typography.labelSmall,
@@ -139,8 +171,13 @@ private fun Composer(
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onSelectTarget: (MessageTarget?) -> Unit,
+    onSendImage: (Uri) -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
+    // The system photo picker: no storage permission, and only the chosen picture is shared.
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let(onSendImage)
+    }
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(8.dp)) {
         Box {
             AssistChip(
@@ -168,6 +205,16 @@ private fun Composer(
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(
+                onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                enabled = !state.sendingImage,
+            ) {
+                if (state.sendingImage) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Outlined.AddPhotoAlternate, contentDescription = "Send a picture")
+                }
+            }
             OutlinedTextField(
                 value = draft,
                 onValueChange = onDraftChange,
@@ -186,4 +233,22 @@ private fun Composer(
             }
         }
     }
+}
+
+@Composable
+private fun ChatImage(bytes: ByteArray, description: String) {
+    val bitmap = remember(bytes) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }
+    if (bitmap == null) {
+        Text("Picture could not be shown", style = MaterialTheme.typography.bodyMedium)
+        return
+    }
+    Image(
+        bitmap = bitmap,
+        contentDescription = description,
+        contentScale = ContentScale.Fit,
+        modifier = Modifier
+            .padding(vertical = 4.dp)
+            .heightIn(max = 320.dp)
+            .clip(RoundedCornerShape(8.dp)),
+    )
 }

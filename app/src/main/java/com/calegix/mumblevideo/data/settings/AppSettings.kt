@@ -88,6 +88,8 @@ data class AppSettings(
     val autoReconnect: Boolean = true,
     val forceTcp: Boolean = false,
     val simulateConnectionDrops: Boolean = false,
+    /** Talk to the scripted fake server instead of real ones. Applies on the next app start. */
+    val useSimulatedCore: Boolean = false,
 ) {
     fun toAudioConfig(): AudioConfig = AudioConfig(
         inputMode = inputMode,

@@ -425,6 +425,7 @@ private fun codecLabel(codec: VideoCodec) = when (codec) {
     VideoCodec.VP8 -> "VP8"
     VideoCodec.VP9 -> "VP9"
     VideoCodec.AV1 -> "AV1"
+    VideoCodec.H264 -> "H.264"
 }
 
 @Composable
@@ -491,10 +492,17 @@ fun AdvancedSettings(
         )
         PreferenceCategory("Developer")
         SwitchPreference(
+            "Use simulated server",
+            s.useSimulatedCore,
+            { v -> viewModel.update { it.copy(useSimulatedCore = v) } },
+            summary = "Talk to a scripted fake server instead of real ones. Takes effect when the app restarts",
+        )
+        SwitchPreference(
             "Simulate connection drops",
             s.simulateConnectionDrops,
             { v -> viewModel.update { it.copy(simulateConnectionDrops = v) } },
-            summary = "Simulated core only: every connection drops after 20 s and reconnects",
+            summary = "Simulated server only: every connection drops after 20 s and reconnects",
+            enabled = s.useSimulatedCore,
         )
     }
 }
@@ -508,7 +516,8 @@ fun AboutSettings(modifier: Modifier = Modifier) {
         ClickPreference(
             "Core",
             onClick = {},
-            summary = "Simulated core (core-fake). The native mumble-video core is not linked yet.",
+            summary = "Voice: Opus over OCB2-encrypted UDP (TCP fallback). Video receive: not yet " +
+                "(waits on mumble-core's video transport over JNI).",
         )
         ClickPreference(
             "Source of the desktop client and server",

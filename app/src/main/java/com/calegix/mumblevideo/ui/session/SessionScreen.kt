@@ -1,5 +1,9 @@
 package com.calegix.mumblevideo.ui.session
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.ImageDecoder
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,6 +68,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.fromHtml
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,6 +87,8 @@ import com.calegix.mumblevideo.core.UserSession
 import com.calegix.mumblevideo.core.VoiceInputMode
 import com.calegix.mumblevideo.ui.AppViewModelProvider
 import com.calegix.mumblevideo.ui.video.VideoPane
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private enum class SessionTab(val label: String) { Channels("Channels"), Chat("Chat"), Video("Video") }
 
@@ -96,6 +103,14 @@ fun SessionScreen(
     chatViewModel: ChatViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val sendImage: (Uri) -> Unit = remember(chatViewModel) {
+        { uri ->
+            chatViewModel.sendImage { limit ->
+                withContext(Dispatchers.Default) { loadPicture(context, uri)?.let { ChatImages.toMessage(it, limit) } }
+            }
+        }
+    }
     val channelActions = remember(viewModel) {
         ChannelActions(viewModel::joinChannel, viewModel::toggleCollapsed, viewModel::showUser, viewModel::pushToTalk)
     }
@@ -195,6 +210,7 @@ fun SessionScreen(
                                     chatViewModel::setDraft,
                                     chatViewModel::send,
                                     chatViewModel::selectTarget,
+                                    sendImage,
                                     Modifier.weight(1f),
                                 )
                             }
@@ -208,6 +224,7 @@ fun SessionScreen(
                             chatViewModel::setDraft,
                             chatViewModel::send,
                             chatViewModel::selectTarget,
+                            sendImage,
                         )
 
                         SessionTab.Video -> VideoPane(onOpenStream = onOpenStream)
@@ -541,3 +558,15 @@ private fun AccessTokensDialog(initial: List<String>, onSave: (List<String>) -> 
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
+
+/** Decodes a picked picture, already scaled down so a huge photo never sits in memory at full size. */
+internal fun loadPicture(context: Context, uri: Uri): Bitmap? = runCatching {
+    ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
+        val longest = maxOf(info.size.width, info.size.height)
+        if (longest > 2048) {
+            val factor = 2048f / longest
+            decoder.setTargetSize((info.size.width * factor).toInt(), (info.size.height * factor).toInt())
+        }
+        decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+    }
+}.getOrNull()

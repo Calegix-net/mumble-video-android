@@ -4,10 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.calegix.mumblevideo.core.ConnectionState
 import com.calegix.mumblevideo.core.DisconnectReason
+import com.calegix.mumblevideo.core.MessageTarget
 import com.calegix.mumblevideo.data.servers.SavedServer
 import com.calegix.mumblevideo.data.settings.AppSettings
 import com.calegix.mumblevideo.data.settings.SettingsRepository
 import com.calegix.mumblevideo.session.SessionController
+import com.calegix.mumblevideo.ui.session.ChatViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -45,6 +47,21 @@ class MainViewModel(
 
     /** A server parsed from a `mumble://` link, waiting for the server list to offer it. */
     val pendingLink: StateFlow<SavedServer?> = _pendingLink.asStateFlow()
+
+    fun imageLimit(): Int = session.core.capabilities.value.maxImageMessageLength
+
+    /** Posts a note and/or an image message to the current channel (debug progress reports). */
+    fun post(text: String?, imageHtml: String?) {
+        val channel = session.core.serverState.value.selfUser?.channel ?: return
+        viewModelScope.launch {
+            runCatching {
+                if (!text.isNullOrBlank()) {
+                    session.core.sendMessage(MessageTarget.ToChannel(channel), ChatViewModel.escapeHtml(text))
+                }
+                if (imageHtml != null) session.core.sendMessage(MessageTarget.ToChannel(channel), imageHtml)
+            }
+        }
+    }
 
     fun answerCertificate(accept: Boolean) {
         viewModelScope.launch { session.answerCertificatePrompt(accept) }

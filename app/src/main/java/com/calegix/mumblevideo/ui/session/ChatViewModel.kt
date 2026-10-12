@@ -6,6 +6,7 @@ import com.calegix.mumblevideo.core.ChatMessage
 import com.calegix.mumblevideo.core.MessageTarget
 import com.calegix.mumblevideo.core.MumbleCoreException
 import com.calegix.mumblevideo.core.ServerState
+import com.calegix.mumblevideo.data.settings.SettingsRepository
 import com.calegix.mumblevideo.session.SessionController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -27,18 +28,32 @@ data class ChatUiState(
     val availableTargets: List<ChatTarget> = emptyList(),
     val currentChannelLabel: String = "",
     val error: String? = null,
+    /** Show embedded images (Settings > General > Load images). */
+    val loadImages: Boolean = true,
+    /** Longest image message the server accepts, in characters. */
+    val imageLimit: Int = 0,
+    val sendingImage: Boolean = false,
 )
 
-class ChatViewModel(private val session: SessionController) : ViewModel() {
+class ChatViewModel(
+    private val session: SessionController,
+    settings: SettingsRepository,
+) : ViewModel() {
     private val core = session.core
     private val selectedTarget = MutableStateFlow<MessageTarget?>(null)
     private val error = MutableStateFlow<String?>(null)
+    private val sendingImage = MutableStateFlow(false)
 
     private val _draft = MutableStateFlow("")
     val draft: StateFlow<String> = _draft.asStateFlow()
 
     val uiState: StateFlow<ChatUiState> =
-        combine(session.chat, core.serverState, selectedTarget, error) { chat, state, selected, error ->
+        combine(
+            combine(session.chat, core.serverState, selectedTarget, error, ::Quad),
+            settings.settings,
+            core.capabilities,
+            sendingImage,
+        ) { (chat, state, selected, error), prefs, caps, sending ->
             val channelLabel = state.selfUser?.channel?.let { state.channels[it]?.name }.orEmpty()
             val targets = buildList {
                 state.selfUser?.channel?.let {
@@ -54,6 +69,9 @@ class ChatViewModel(private val session: SessionController) : ViewModel() {
                 availableTargets = targets,
                 currentChannelLabel = channelLabel,
                 error = error,
+                loadImages = prefs.loadImages,
+                imageLimit = caps.maxImageMessageLength,
+                sendingImage = sending,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatUiState())
 
@@ -81,6 +99,32 @@ class ChatViewModel(private val session: SessionController) : ViewModel() {
             }
         }
     }
+
+    /**
+     * Sends an image message. [encode] turns the picture into an `<img>` message no longer than the
+     * limit it is given (see [ChatImages.toMessage]), and returns null if it cannot fit.
+     */
+    fun sendImage(encode: suspend (limit: Int) -> String?) {
+        val target = currentTarget() ?: return
+        viewModelScope.launch {
+            sendingImage.value = true
+            try {
+                val html = encode(core.capabilities.value.maxImageMessageLength)
+                if (html == null) {
+                    error.value = "That picture is too large for this server, even shrunk"
+                } else {
+                    core.sendMessage(target, html)
+                }
+            } catch (e: MumbleCoreException) {
+                error.value = e.message
+            } finally {
+                sendingImage.value = false
+            }
+        }
+    }
+
+    private fun currentTarget(): MessageTarget? =
+        selectedTarget.value ?: core.serverState.value.selfUser?.channel?.let { MessageTarget.ToChannel(it) }
 
     fun markRead() = session.markChatRead()
 
