@@ -7,6 +7,7 @@ import com.calegix.mumblevideo.core.fake.FakeMumbleCore
 import com.calegix.mumblevideo.data.certificates.CertificateRepository
 import com.calegix.mumblevideo.data.certificates.FileCertificateRepository
 import com.calegix.mumblevideo.data.db.AppDatabase
+import com.calegix.mumblevideo.data.db.EXAMPLE_SERVERS
 import com.calegix.mumblevideo.data.servers.PublicServerSource
 import com.calegix.mumblevideo.data.servers.RoomServerRepository
 import com.calegix.mumblevideo.data.servers.RoomTrustStore
@@ -69,6 +70,13 @@ class AppContainer(context: Context) {
     )
 
     init {
+        // Builds before the real core seeded every list with the fake core's scripted servers, which
+        // only confuse a real session. Remove exactly those rows; a user's own entries never match.
+        if (!simulated) {
+            appScope.launch(Dispatchers.IO) {
+                EXAMPLE_SERVERS.forEach { (label, host, _) -> database.servers().deleteExample(label, host) }
+            }
+        }
         fakeCore?.let { fake ->
             appScope.launch { settings.settings.collect { fake.simulateConnectionDrops = it.simulateConnectionDrops } }
         }

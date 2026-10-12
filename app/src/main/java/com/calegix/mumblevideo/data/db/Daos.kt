@@ -25,6 +25,9 @@ interface ServerDao {
     @Query("DELETE FROM servers WHERE id = :id")
     suspend fun delete(id: Long)
 
+    @Query("DELETE FROM servers WHERE label = :label AND host = :host AND port = 64738 AND username = ''")
+    suspend fun deleteExample(label: String, host: String)
+
     @Query("UPDATE servers SET last_connected = :at WHERE id = :id")
     suspend fun markConnected(id: Long, at: Long)
 }
