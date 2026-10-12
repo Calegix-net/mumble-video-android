@@ -35,7 +35,7 @@ set(3RDPARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mumble-core/3rdparty")
 set(tests OFF)
 add_subdirectory(mumble-core/src/mumble-core mumble-core EXCLUDE_FROM_ALL)
 
-add_library(mvclient SHARED opus_jni.c)
+add_library(mvclient SHARED opus_jni.c media_jni.cpp)
 target_link_libraries(mvclient PRIVATE opus mumble-core log)
 target_compile_options(mvclient PRIVATE -Wall -Wextra -Werror)
 target_link_options(mvclient PRIVATE
