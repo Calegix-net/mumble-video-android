@@ -950,6 +950,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 setSubscription(key, Subscription.Pending)
             }
             sendSubscribe(key, subscribe = true, keyframe = true, bandwidth = preferredBandwidth)
+            Log.i(TAG, "subscribed to $key (${stream.codec} ${stream.width}x${stream.height})")
         }
 
         fun unsubscribe(key: StreamKey) {

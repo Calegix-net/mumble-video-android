@@ -45,6 +45,7 @@ class VideoDecoder(
     private var worker: Thread? = null
 
     @Volatile private var running = false
+    private var firstFrameLogged = false
 
     /** One reassembled unit from mumble-core. */
     fun submit(unit: CoreVideoUnit) {
@@ -103,6 +104,7 @@ class VideoDecoder(
                             val height = frame.height.takeIf { it > 0 } ?: announcedHeight
                             configure(MediaFormat.createVideoFormat(mime, width, height), target, null, 0)
                             start()
+                            Log.i(TAG, "$codec decoder ${this.name} started at ${width}x$height")
                         }
                     }
                     val index = decoder.dequeueInputBuffer(INPUT_TIMEOUT_US)
@@ -135,6 +137,10 @@ class VideoDecoder(
             // Render immediately: these are live frames, and pacing is the network's.
             val render = info.size > 0
             decoder.releaseOutputBuffer(index, render)
+            if (render && !firstFrameLogged) {
+                firstFrameLogged = true
+                Log.i(TAG, "$codec first frame rendered")
+            }
             if (render) {
                 val format = decoder.outputFormat
                 onFrame(format.getInteger(MediaFormat.KEY_WIDTH), format.getInteger(MediaFormat.KEY_HEIGHT))

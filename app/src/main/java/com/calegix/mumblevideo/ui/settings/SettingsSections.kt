@@ -516,8 +516,8 @@ fun AboutSettings(modifier: Modifier = Modifier) {
         ClickPreference(
             "Core",
             onClick = {},
-            summary = "Voice: Opus over OCB2-encrypted UDP (TCP fallback). Video receive: not yet " +
-                "(waits on mumble-core's video transport over JNI).",
+            summary = "Voice: Opus over OCB2-encrypted UDP, TCP fallback. Video: mumble-core over JNI, " +
+                "decoded by MediaCodec. Sending video: not yet.",
         )
         ClickPreference(
             "Source of the desktop client and server",
