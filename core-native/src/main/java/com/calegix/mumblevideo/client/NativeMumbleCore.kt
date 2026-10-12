@@ -226,8 +226,13 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
 
         _connectionState.value = ConnectionState.Connecting(server, ConnectPhase.Handshaking)
         val trust = RecordingTrustManager()
+        val ssl = try {
+            Tls.context(request.certificate, trust)
+        } catch (e: Exception) {
+            val reason = "Your client certificate could not be loaded (${e.message}). Pick another one in Settings › Authentication."
+            return Outcome.Final(ConnectionState.Disconnected(DisconnectReason.Unreachable(reason)))
+        }
         val socket = try {
-            val ssl = Tls.context(request.certificate, trust)
             (ssl.socketFactory.createSocket() as SSLSocket).apply {
                 connect(InetSocketAddress(address, server.port), CONNECT_TIMEOUT_MS)
                 tcpNoDelay = true
@@ -457,6 +462,10 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
 
                 ControlType.PERMISSION_DENIED -> {
                     val denied = MumbleProto.PermissionDenied.parseFrom(p)
+                    Log.i(
+                        TAG,
+                        "permission denied: type=${denied.type} permission=${denied.permission} reason=${denied.reason}",
+                    )
                     _events.tryEmit(CoreEvent.PermissionDenied(denied.reason.ifBlank { denyText(denied) }))
                 }
 
@@ -542,6 +551,11 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 )
             }
             if (config.hasWelcomeText()) welcome = config.welcomeText
+            Log.i(
+                TAG,
+                "server config: messageLength=${config.messageLength} imageMessageLength=${config.imageMessageLength} " +
+                    "allowHtml=${config.allowHtml} features=${config.featuresList}",
+            )
             if (_connectionState.value is ConnectionState.Connected) publishConnected()
         }
 
@@ -933,6 +947,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             is MessageTarget.ToUser -> builder.addSession(target.session.value)
         }
         l.send(ControlType.TEXT_MESSAGE, builder.build())
+        Log.i(TAG, "text message sent: ${text.length} chars to $target")
         val state = _serverState.value
         _messages.tryEmit(
             ChatMessage(
