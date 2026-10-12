@@ -16,6 +16,7 @@ import argparse
 import ctypes
 import ctypes.util
 import math
+import select
 import socket
 import ssl
 import struct
@@ -105,7 +106,7 @@ class Peer:
         ctx.verify_mode = ssl.CERT_NONE
         raw = socket.create_connection((args.host, args.port), timeout=10)
         self.sock = ctx.wrap_socket(raw)
-        self.sock.settimeout(None)
+        self.sock.settimeout(0.5)
 
     def log(self, text):
         print("%s %s" % (time.strftime("%H:%M:%S"), text), flush=True)
@@ -143,9 +144,18 @@ class Peer:
             self.flush_spurts(force=True)  # long talk spurts report every 10 s
 
     def reader(self):
+        # Python's SSL socket is not safe for a read and a write at once from two threads, so every
+        # TLS operation happens under self.lock; reads only when select says data is waiting.
         buf = b""
         while True:
-            data = self.sock.recv(65536)
+            ready, _, _ = select.select([self.sock], [], [], 0.05)
+            if not ready and not self.sock.pending():
+                continue
+            with self.lock:
+                try:
+                    data = self.sock.recv(65536)
+                except (ssl.SSLWantReadError, socket.timeout):
+                    continue
             if not data:
                 self.log("server closed the connection")
                 return
