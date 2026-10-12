@@ -141,6 +141,7 @@ fun VideoPane(
                         autoSubscribe = state.autoSubscribe,
                         playback = playback,
                         onOpen = { onOpenStream(tile.stream.key) },
+                        onStopScreen = viewModel::stopScreenShare,
                     )
                 }
             }
@@ -256,8 +257,17 @@ private fun WatchingList(watchers: List<Watcher>) {
 }
 
 @Composable
-private fun VideoTile(tile: StreamTile, autoSubscribe: Boolean, playback: StreamPlayback, onOpen: () -> Unit) {
+private fun VideoTile(
+    tile: StreamTile,
+    autoSubscribe: Boolean,
+    playback: StreamPlayback,
+    onOpen: () -> Unit,
+    onStopScreen: () -> Unit,
+) {
     val stream = tile.stream
+    // Our own screen share has no live self-view: the screen shown inside itself is an endless
+    // hall of mirrors. A card says what is being shared instead, as Meet and Zoom do.
+    val ownScreen = stream.isLocal && stream.sourceKind.isScreen
     // Remembered per stream, so a data-saver user who tapped "watch" keeps watching while scrolling.
     var wanted by rememberSaveable(stream.key.toString()) { mutableStateOf(autoSubscribe || stream.isLocal) }
     if (autoSubscribe) wanted = true
@@ -274,7 +284,13 @@ private fun VideoTile(tile: StreamTile, autoSubscribe: Boolean, playback: Stream
             .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .clickable(role = Role.Button, onClickLabel = "Open full screen") {
-                if (wanted) onOpen() else wanted = true
+                if (ownScreen) {
+                    Unit
+                } else if (wanted) {
+                    onOpen()
+                } else {
+                    wanted = true
+                }
             }
             .semantics(mergeDescendants = true) { contentDescription = title },
     ) {
@@ -282,7 +298,9 @@ private fun VideoTile(tile: StreamTile, autoSubscribe: Boolean, playback: Stream
             Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black),
             contentAlignment = Alignment.Center,
         ) {
-            if (wanted) {
+            if (ownScreen) {
+                SharingCard(stream, onStopScreen)
+            } else if (wanted) {
                 VideoSurface(
                     stream.key,
                     playback::attachSurface,
@@ -367,4 +385,27 @@ private fun ShareAudioDialog(initial: Boolean, onContinue: (Boolean) -> Unit, on
         confirmButton = { TextButton(onClick = { onContinue(share) }) { Text("Continue") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+@Composable
+private fun SharingCard(stream: com.calegix.mumblevideo.core.VideoStream, onStop: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.padding(16.dp),
+    ) {
+        Icon(
+            Icons.AutoMirrored.Outlined.ScreenShare,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(36.dp),
+        )
+        Text("You're sharing your screen", color = Color.White, style = MaterialTheme.typography.titleSmall)
+        Text(
+            "${stream.width}×${stream.height} · ${if (stream.hasAudio) "with sound" else "no sound"}",
+            color = Color.White.copy(alpha = 0.8f),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        FilledTonalButton(onClick = onStop) { Text("Stop sharing") }
+    }
 }
