@@ -67,6 +67,7 @@ class AppContainer(context: Context) {
         scope = appScope,
         onSessionStarting = { ConnectionService.start(appContext) },
         autoCertificate = !simulated,
+        authorizeScreenCapture = { code, data -> (core as? NativeMumbleCore)?.provideScreenCapture(code, data) },
     )
 
     init {

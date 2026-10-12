@@ -1,7 +1,10 @@
 package com.calegix.mumblevideo.ui.video
 
 import android.Manifest
+import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -114,7 +117,8 @@ fun VideoPane(
                         state,
                         onToggleCamera = viewModel::toggleCamera,
                         onSwitchCamera = viewModel::switchCamera,
-                        onToggleScreen = viewModel::toggleScreenShare,
+                        onStopScreen = viewModel::stopScreenShare,
+                        onScreenConsent = viewModel::startScreenShare,
                     )
                 }
                 if (state.tiles.isEmpty()) {
@@ -145,7 +149,8 @@ private fun OwnVideoControls(
     state: VideoUiState,
     onToggleCamera: () -> Unit,
     onSwitchCamera: () -> Unit,
-    onToggleScreen: () -> Unit,
+    onStopScreen: () -> Unit,
+    onScreenConsent: (resultCode: Int, data: Intent) -> Unit,
 ) {
     val cameraOn = state.local.camera != null
     val sharing = state.local.screen != null
@@ -154,6 +159,11 @@ private fun OwnVideoControls(
         if (granted) onToggleCamera()
     }
     val context = LocalContext.current
+    // The system's "start recording or casting?" consent; skipped when the app-op is pre-allowed.
+    val screenConsent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val data = result.data
+        if (result.resultCode == Activity.RESULT_OK && data != null) onScreenConsent(result.resultCode, data)
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilledTonalButton(
@@ -169,7 +179,16 @@ private fun OwnVideoControls(
             FilledTonalIconButton(onClick = onSwitchCamera) {
                 Icon(Icons.Outlined.Cameraswitch, contentDescription = "Switch camera")
             }
-            FilledTonalButton(onClick = onToggleScreen) {
+            FilledTonalButton(
+                onClick = {
+                    if (sharing) {
+                        onStopScreen()
+                    } else {
+                        val projection = context.getSystemService(MediaProjectionManager::class.java)
+                        screenConsent.launch(projection.createScreenCaptureIntent())
+                    }
+                },
+            ) {
                 Icon(
                     if (sharing) {
                         Icons.AutoMirrored.Outlined.StopScreenShare

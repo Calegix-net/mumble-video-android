@@ -1,14 +1,18 @@
 package com.calegix.mumblevideo.session
 
+import android.content.Intent
 import com.calegix.mumblevideo.core.ChatMessage
 import com.calegix.mumblevideo.core.ConnectRequest
 import com.calegix.mumblevideo.core.ConnectionState
 import com.calegix.mumblevideo.core.MumbleCore
+import com.calegix.mumblevideo.core.MumbleCoreException
+import com.calegix.mumblevideo.core.ScreenShareRequest
 import com.calegix.mumblevideo.data.certificates.CertificateRepository
 import com.calegix.mumblevideo.data.servers.SavedServer
 import com.calegix.mumblevideo.data.servers.ServerRepository
 import com.calegix.mumblevideo.data.servers.TrustStore
 import com.calegix.mumblevideo.data.settings.SettingsRepository
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +22,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * App-level owner of "the" session: turns a saved server plus settings into a [ConnectRequest],
@@ -35,7 +40,37 @@ class SessionController(
     private val onSessionStarting: () -> Unit = {},
     /** Generate a certificate on the first connect if the user has none, as Mumla does. */
     private val autoCertificate: Boolean = false,
+    /** Hands the screen-capture consent to the core (the native core needs it; the fake does not). */
+    private val authorizeScreenCapture: (resultCode: Int, data: Intent) -> Unit = { _, _ -> },
 ) {
+    private val _screenCaptureForeground = MutableStateFlow(false)
+
+    /** Whether the foreground service must declare the media-projection type. */
+    val screenCaptureForeground: StateFlow<Boolean> = _screenCaptureForeground.asStateFlow()
+    private var foregroundUpdated: CompletableDeferred<Unit>? = null
+
+    /**
+     * Starts a screen share from the user's consent. Android 14+ requires the foreground service to
+     * declare the media-projection type before the projection is created, so the service is
+     * promoted first and this waits until it says so.
+     */
+    suspend fun startScreenShare(resultCode: Int, data: Intent, request: ScreenShareRequest) {
+        val ready = CompletableDeferred<Unit>().also { foregroundUpdated = it }
+        _screenCaptureForeground.value = true
+        withTimeoutOrNull(3_000) { ready.await() }
+        authorizeScreenCapture(resultCode, data)
+        try {
+            core.startScreenShare(request)
+        } catch (e: MumbleCoreException) {
+            _screenCaptureForeground.value = false
+            throw e
+        }
+    }
+
+    /** Called by the service once its foreground types are what [screenCaptureForeground] asks. */
+    fun onForegroundTypesUpdated() {
+        foregroundUpdated?.complete(Unit)
+    }
     private val _currentServer = MutableStateFlow<SavedServer?>(null)
 
     /** The server of the current or most recent connection attempt. */
@@ -53,6 +88,14 @@ class SessionController(
 
     init {
         scope.launch { core.messages.collect { message -> appendMessage(message) } }
+        // The projection type is dropped again once the share has ended, however it ended.
+        scope.launch {
+            core.localVideo.map { it.screen != null }.distinctUntilChanged().collect { sharing ->
+                if (!sharing && _screenCaptureForeground.value && foregroundUpdated?.isCompleted != false) {
+                    _screenCaptureForeground.value = false
+                }
+            }
+        }
         scope.launch {
             settings.settings.map { it.toAudioConfig() }.distinctUntilChanged().collect { core.setAudioConfig(it) }
         }

@@ -1,5 +1,6 @@
 package com.calegix.mumblevideo.ui.video
 
+import android.content.Intent
 import android.view.Surface
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -140,21 +141,22 @@ class VideoViewModel(
         )
     }
 
-    fun toggleScreenShare() = command {
-        if (core.localVideo.value.screen != null) {
-            core.stopScreenShare()
-        } else {
-            val prefs = settings.settings.value
-            core.startScreenShare(
-                ScreenShareRequest(
-                    width = prefs.screenResolution.width,
-                    height = prefs.screenResolution.height,
-                    framerate = prefs.screenFramerate,
-                    codec = prefs.codecPreference,
-                    includeAudio = prefs.shareDeviceAudio,
-                ),
-            )
-        }
+    fun stopScreenShare() = command { core.stopScreenShare() }
+
+    /** Starts sharing with the result of the system's screen-capture consent. */
+    fun startScreenShare(resultCode: Int, data: Intent) = command {
+        val prefs = settings.settings.value
+        session.startScreenShare(
+            resultCode,
+            data,
+            ScreenShareRequest(
+                width = prefs.screenResolution.width,
+                height = prefs.screenResolution.height,
+                framerate = prefs.screenFramerate,
+                codec = prefs.codecPreference,
+                includeAudio = prefs.shareDeviceAudio,
+            ),
+        )
     }
 
     fun consumeMessage() {

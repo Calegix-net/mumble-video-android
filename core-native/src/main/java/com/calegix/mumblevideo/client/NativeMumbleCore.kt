@@ -2,7 +2,10 @@ package com.calegix.mumblevideo.client
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.SystemClock
@@ -16,6 +19,7 @@ import com.calegix.mumblevideo.client.media.CameraStreamer
 import com.calegix.mumblevideo.client.media.FrameCounter
 import com.calegix.mumblevideo.client.media.MediaEvents
 import com.calegix.mumblevideo.client.media.MumbleCoreMedia
+import com.calegix.mumblevideo.client.media.ScreenStreamer
 import com.calegix.mumblevideo.client.media.VideoDecoder
 import com.calegix.mumblevideo.client.net.ControlFraming
 import com.calegix.mumblevideo.client.net.ControlMessage
@@ -911,6 +915,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
 
         private fun stopMedia() {
             stopCamera(announce = false)
+            stopScreen(announce = false)
             decoders.keys.toList().forEach(::closeDecoder)
             synchronized(media) { media.close() }
             micRelease?.cancel()
@@ -971,6 +976,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 camera?.setPreview(surface)
                 return
             }
+            if (key == screenKey) return // no self-view of a screen share: it would mirror itself forever
             decoders[key]?.setSurface(surface)
         }
 
@@ -1007,6 +1013,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             if (key.session == self) {
                 // A viewer asking for a keyframe of one of our streams (relayed by the server).
                 if (echo.requestKeyframe && key == cameraKey) camera?.requestKeyframe()
+                if (echo.requestKeyframe && key == screenKey) screen?.requestKeyframe()
                 return
             }
             if (!echo.subscribe && decoders.containsKey(key)) {
@@ -1048,7 +1055,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                     width = width,
                     height = height,
                     framerate = request.framerate,
-                    bitrate = sendBitrate(request, width, height),
+                    bitrate = sendBitrate(request.maxBandwidth, width, height),
                     codec = codec,
                 ),
                 onFrame = { frame -> sendVideoFrame(streamId, frame) },
@@ -1100,6 +1107,128 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             Log.i(TAG, "camera ${option.name} sending ${sent.first}x${sent.second}@${request.framerate} $codec as $key")
         }
 
+        @Volatile private var screen: ScreenStreamer? = null
+
+        @Volatile private var screenKey: StreamKey? = null
+
+        fun startScreen(request: ScreenShareRequest, projection: MediaProjection) {
+            val me = self ?: throw MumbleCoreException(Kind.NotConnected, "Not synchronised yet")
+            stopScreen()
+            val streamId = nextStreamId++
+            val key = StreamKey(me, streamId)
+            val codec = request.codec ?: VideoCodec.VP8
+            val streamer = ScreenStreamer(
+                context = context,
+                projection = projection,
+                config = ScreenStreamer.Config(
+                    width = request.width,
+                    height = request.height,
+                    framerate = request.framerate,
+                    bitrate = sendBitrate(request.maxBandwidth, request.width, request.height),
+                    codec = codec,
+                ),
+                onFrame = { frame -> sendVideoFrame(streamId, frame) },
+                onError = { reason ->
+                    Log.w(TAG, "screen share stopped: $reason")
+                    scope.launch(Dispatchers.Default) { stopScreen() }
+                },
+            )
+            try {
+                streamer.start()
+            } catch (e: IllegalStateException) {
+                streamer.close()
+                throw MumbleCoreException(Kind.NotSupported, e.message ?: "Screen sharing could not start", e)
+            }
+            screen = streamer
+            screenKey = key
+            val name = "${android.os.Build.MODEL} screen"
+            announceLocal(
+                key,
+                codec,
+                VideoSourceKind.Display,
+                name,
+                streamer.outputWidth,
+                streamer.outputHeight,
+                request.framerate,
+                streamer.config.bitrate,
+            )
+            _localVideo.update {
+                it.copy(
+                    screen = LocalStream(key, streamer.outputWidth, streamer.outputHeight, request.framerate, codec),
+                )
+            }
+        }
+
+        fun stopScreen(announce: Boolean = true) {
+            val streamer = screen ?: return
+            val key = screenKey
+            screen = null
+            screenKey = null
+            streamer.close()
+            if (key != null) withdrawLocal(key, announce)
+            _localVideo.update { it.copy(screen = null) }
+        }
+
+        /** Tells the server about one of our streams and lists it locally (shown from its source). */
+        private fun announceLocal(
+            key: StreamKey,
+            codec: VideoCodec,
+            kind: VideoSourceKind,
+            name: String,
+            width: Int,
+            height: Int,
+            framerate: Int,
+            bitrate: Int,
+        ) {
+            send(
+                ControlType.VIDEO_STATE,
+                MumbleProto.VideoState.newBuilder()
+                    .setStreamId(key.streamId)
+                    .setActive(true)
+                    .setCodec(protoCodec(codec))
+                    .setSourceKind(
+                        if (kind ==
+                            VideoSourceKind.Camera
+                        ) {
+                            MumbleProto.VideoState.SourceKind.Camera
+                        } else {
+                            MumbleProto.VideoState.SourceKind.Display
+                        },
+                    )
+                    .setSourceName(name)
+                    .setWidth(width)
+                    .setHeight(height)
+                    .setMaxFramerate(framerate)
+                    .setTargetBandwidth(bitrate)
+                    .build(),
+            )
+            _videoStreams.update { streams ->
+                streams.filterNot { it.key == key } + VideoStream(
+                    key = key,
+                    codec = codec,
+                    sourceKind = kind,
+                    sourceName = name,
+                    width = width,
+                    height = height,
+                    maxFramerate = framerate,
+                    targetBandwidth = bitrate,
+                    subscription = Subscription.Active(width, height, framerate.toFloat(), 0),
+                    isLocal = true,
+                )
+            }
+            Log.i(TAG, "sending $kind $name at ${width}x$height@$framerate $codec as $key")
+        }
+
+        private fun withdrawLocal(key: StreamKey, announce: Boolean) {
+            if (announce) {
+                send(
+                    ControlType.VIDEO_STATE,
+                    MumbleProto.VideoState.newBuilder().setStreamId(key.streamId).setActive(false).build(),
+                )
+            }
+            _videoStreams.update { streams -> streams.filterNot { it.key == key } }
+        }
+
         fun stopCamera(announce: Boolean = true) {
             val streamer = camera ?: return
             val key = cameraKey
@@ -1137,14 +1266,14 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         }
 
         /** What to ask the encoder for: the request's cap, else by size, within the server's limit. */
-        private fun sendBitrate(request: CameraRequest, width: Int, height: Int): Int {
+        private fun sendBitrate(maxBandwidth: Int, width: Int, height: Int): Int {
             val bySize = when {
                 width * height >= 1920 * 1080 -> 3_000_000
                 width * height >= 1280 * 720 -> 1_500_000
                 width * height >= 854 * 480 -> 800_000
                 else -> 450_000
             }
-            var bitrate = if (request.maxBandwidth > 0) minOf(request.maxBandwidth, bySize) else bySize
+            var bitrate = if (maxBandwidth > 0) minOf(maxBandwidth, bySize) else bySize
             val serverCap = _capabilities.value.maxVideoBandwidth
             if (serverCap > 0) bitrate = minOf(bitrate, serverCap)
             return bitrate
@@ -1388,10 +1517,38 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         withContext(Dispatchers.Default) { l.stopCamera() }
     }
 
-    override suspend fun startScreenShare(request: ScreenShareRequest): Unit =
-        throw MumbleCoreException(Kind.NotSupported, "Screen sharing isn't available in this build yet")
+    private var screenCapture: Pair<Int, Intent>? = null
 
-    override suspend fun stopScreenShare() = Unit
+    /**
+     * Android's half of [startScreenShare]: the result of the user's consent to
+     * MediaProjectionManager.createScreenCaptureIntent(). It is used once. The foreground service
+     * must already declare the media-projection type when [startScreenShare] runs (Android 14+).
+     */
+    fun provideScreenCapture(resultCode: Int, data: Intent) {
+        screenCapture = resultCode to data
+    }
+
+    override suspend fun startScreenShare(request: ScreenShareRequest) {
+        val l = requireLink()
+        if (!_capabilities.value.video) {
+            throw MumbleCoreException(
+                Kind.NotSupported,
+                "This server does not support video",
+            )
+        }
+        val (resultCode, data) = screenCapture
+            ?: throw MumbleCoreException(Kind.PermissionDenied, "Screen capture was not allowed")
+        screenCapture = null
+        val manager = context.getSystemService(MediaProjectionManager::class.java)
+        val projection = manager.getMediaProjection(resultCode, data)
+            ?: throw MumbleCoreException(Kind.PermissionDenied, "Screen capture was not allowed")
+        withContext(Dispatchers.Default) { l.startScreen(request, projection) }
+    }
+
+    override suspend fun stopScreenShare() {
+        val l = link ?: return
+        withContext(Dispatchers.Default) { l.stopScreen() }
+    }
 
     // ---------------------------------------------------------------------------------------------
 

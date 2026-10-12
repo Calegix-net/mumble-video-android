@@ -72,11 +72,24 @@ class ConnectionService : LifecycleService() {
     }
 
     private fun observe() {
+        // Foreground types follow what is being shared; re-declared only when that changes.
         lifecycleScope.launch {
-            session.core.localVideo.map { it.camera != null }.distinctUntilChanged().drop(1).collect { camera ->
+            combine(
+                session.core.localVideo.map {
+                    it.camera != null
+                },
+                session.screenCaptureForeground,
+            ) { camera, screen ->
+                camera to screen
+            }.distinctUntilChanged().drop(1).collect { (camera, screen) ->
                 runCatching {
-                    goForeground(build(session.core.connectionState.value, session.core.voiceState.value), camera)
+                    goForeground(
+                        build(session.core.connectionState.value, session.core.voiceState.value),
+                        camera,
+                        screen,
+                    )
                 }.onFailure { Log.w("MvService", "could not change foreground type", it) }
+                session.onForegroundTypesUpdated()
             }
         }
         lifecycleScope.launch {
@@ -99,8 +112,9 @@ class ConnectionService : LifecycleService() {
         }
     }
 
-    private fun goForeground(notification: Notification, camera: Boolean = false) {
+    private fun goForeground(notification: Notification, camera: Boolean = false, screen: Boolean = false) {
         var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+        if (screen) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
         // While the camera is shared, so it keeps running with the screen off or the app in the
         // background (Android 11+ stops camera access in background services without this type).
         if (camera &&
