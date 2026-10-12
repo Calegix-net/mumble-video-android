@@ -55,6 +55,7 @@ import com.google.protobuf.MessageLite
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.UnknownHostException
@@ -218,8 +219,8 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
     private suspend fun runOnce(request: ConnectRequest, onTrusted: (String) -> Unit): Outcome {
         val server = request.server
         _connectionState.value = ConnectionState.Connecting(server, ConnectPhase.Resolving)
-        val address = try {
-            withContext(Dispatchers.IO) { InetAddress.getByName(server.host) }
+        val addresses = try {
+            withContext(Dispatchers.IO) { InetAddress.getAllByName(server.host).toList() }
         } catch (e: UnknownHostException) {
             return Outcome.Dropped(DisconnectReason.Unreachable("Unknown host ${server.host}"), "Unknown host", false)
         }
@@ -233,22 +234,38 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 "Pick another one in Settings › Authentication."
             return Outcome.Final(ConnectionState.Disconnected(DisconnectReason.Unreachable(reason)))
         }
-        val socket = try {
-            (ssl.socketFactory.createSocket() as SSLSocket).apply {
-                connect(InetSocketAddress(address, server.port), CONNECT_TIMEOUT_MS)
-                tcpNoDelay = true
-                startHandshake()
+
+        // Try every address the name resolves to: a host with an AAAA record the network can't
+        // route (common on phones) must still be reachable over IPv4. IPv4 first, then IPv6.
+        var lastError: IOException? = null
+        var connected: Pair<SSLSocket, InetAddress>? = null
+        for (candidate in addresses.sortedBy { if (it is Inet4Address) 0 else 1 }) {
+            try {
+                val socket = withContext(Dispatchers.IO) {
+                    (ssl.socketFactory.createSocket() as SSLSocket).apply {
+                        connect(InetSocketAddress(candidate, server.port), CONNECT_TIMEOUT_MS)
+                        tcpNoDelay = true
+                        startHandshake()
+                    }
+                }
+                connected = socket to candidate
+                break
+            } catch (e: IOException) {
+                Log.i(TAG, "connect to $candidate failed: ${e.message}")
+                lastError = e
+                if (e is SSLException) break // the server answered; another address won't help
             }
-        } catch (e: IOException) {
-            Log.i(TAG, "connect failed: ${e.message}")
+        }
+        val (socket, address) = connected ?: run {
+            val e = lastError
             val reason = when {
                 e is SSLException -> "TLS failed: ${e.message}"
 
-                localNetworkBlocked(address) ->
+                addresses.any(::localNetworkBlocked) ->
                     "This server is on your local network, which Android only lets apps reach with the " +
                         "\"nearby devices\" permission. Allow it for Mumble Video in the app's settings."
 
-                else -> "Could not connect: ${e.message}"
+                else -> "Could not connect: ${e?.message}"
             }
             return Outcome.Dropped(DisconnectReason.Unreachable(reason), reason, false)
         }
