@@ -47,4 +47,39 @@ class JitterBufferTest {
         assertEquals(4, jitter.size())
         assertTrue(jitter.takeFrame() == 7.toByte())
     }
+
+    @Test
+    fun `an underrun raises the target and rebuffers before playing on`() {
+        val jitter = JitterBuffer(prebuffer = 1)
+        jitter.put(1, byteArrayOf(1), false)
+        assertEquals(1.toByte(), jitter.takeFrame())
+        // The path stalls: underrun, and the next packet alone is not enough to resume.
+        assertEquals(JitterBuffer.Next.Gap, jitter.take())
+        assertEquals(2, jitter.target)
+        jitter.put(2, byteArrayOf(2), false)
+        assertEquals(JitterBuffer.Next.Gap, jitter.take())
+        jitter.put(3, byteArrayOf(3), false)
+        assertEquals(2.toByte(), jitter.takeFrame())
+        assertEquals(3.toByte(), jitter.takeFrame())
+    }
+
+    @Test
+    fun `the target is capped and kept for the next talk spurt`() {
+        val jitter = JitterBuffer(prebuffer = 1, maxPrebuffer = 3)
+        // Five bursts, each followed by a stall: one step up per underrun, up to the cap.
+        var frame = 0L
+        repeat(5) {
+            repeat(jitter.target) { jitter.put(++frame, byteArrayOf(1), false) }
+            while (jitter.take() is JitterBuffer.Next.Packet) Unit
+        }
+        assertEquals(3, jitter.target)
+        jitter.put(++frame, byteArrayOf(2), terminator = true)
+        assertEquals(2.toByte(), jitter.takeFrame()) // the final packet still plays
+        assertEquals(JitterBuffer.Next.Idle, jitter.take())
+        jitter.put(1, byteArrayOf(4), false)
+        jitter.put(2, byteArrayOf(5), false)
+        assertEquals(JitterBuffer.Next.Idle, jitter.take()) // waits for 3 now
+        jitter.put(3, byteArrayOf(6), false)
+        assertEquals(4.toByte(), jitter.takeFrame())
+    }
 }
