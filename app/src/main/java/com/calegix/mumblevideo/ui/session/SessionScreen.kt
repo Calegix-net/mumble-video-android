@@ -501,13 +501,20 @@ private fun ServerInfoDialog(state: SessionUiState, onDismiss: () -> Unit) {
                     InfoLine("Version", "${info.release} (protocol ${info.protocolVersion})")
                     InfoLine("OS", "${info.os} ${info.osVersion}")
                     InfoLine("Voice", if (info.udpActive) "UDP" else "TCP tunnel")
-                    InfoLine("Latency", "${info.latencyMillis} ms")
-                    InfoLine("Max users", info.maxUsers.toString())
+                    InfoLine("Latency", if (info.latencyMillis > 0) "${info.latencyMillis} ms" else "measuring…")
+                    InfoLine("Max users", info.maxUsers.takeIf { it > 0 }?.toString() ?: NOT_ADVERTISED)
                     InfoLine("Audio bandwidth", "${caps.maxAudioBandwidth / 1000} kbit/s")
                     InfoLine("Video", if (caps.video) "Supported" else "Not supported")
                     if (caps.video) {
-                        InfoLine("Video bandwidth", "${caps.maxVideoBandwidth / 1000} kbit/s per stream")
-                        InfoLine("Streams per channel", caps.maxVideoStreamsPerChannel.toString())
+                        InfoLine(
+                            "Video bandwidth",
+                            caps.maxVideoBandwidth.takeIf { it > 0 }?.let { "${it / 1000} kbit/s per stream" }
+                                ?: NOT_ADVERTISED,
+                        )
+                        InfoLine(
+                            "Streams per channel",
+                            caps.maxVideoStreamsPerChannel.takeIf { it > 0 }?.toString() ?: NOT_ADVERTISED,
+                        )
                     }
                     if (info.welcomeText.isNotBlank()) {
                         Text(
@@ -570,3 +577,6 @@ internal fun loadPicture(context: Context, uri: Uri): Bitmap? = runCatching {
         decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
     }
 }.getOrNull()
+
+/** For limits a server did not state; v1.9.x servers state none of the video ones. */
+private const val NOT_ADVERTISED = "not advertised"

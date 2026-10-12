@@ -326,6 +326,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         private var self: UserSession? = null
         private var serverVersion: MumbleProto.Version? = null
         private var welcome = ""
+        private var maxUsers = 0
 
         @Volatile private var udpVerified = false
 
@@ -576,6 +577,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 )
             }
             if (config.hasWelcomeText()) welcome = config.welcomeText
+            if (config.hasMaxUsers()) maxUsers = config.maxUsers
             Log.i(
                 TAG,
                 "server config: messageLength=${config.messageLength} " +
@@ -595,7 +597,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                     os = v?.os.orEmpty(),
                     osVersion = v?.osVersion.orEmpty(),
                     protocolVersion = v?.let { versionString(it) }.orEmpty(),
-                    maxUsers = 0,
+                    maxUsers = maxUsers,
                     udpActive = udpVerified,
                     latencyMillis = tcpPingMillis,
                 ),
