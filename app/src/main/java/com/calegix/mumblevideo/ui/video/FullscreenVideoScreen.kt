@@ -81,7 +81,7 @@ fun FullscreenVideoScreen(
             stream,
             viewModel::attachSurface,
             viewModel::detachSurface,
-            Modifier.fillMaxWidth().aspectRatio(aspect, matchHeightConstraintsFirst = false),
+            Modifier.fitAspect(tile?.stream?.let(::streamAspect) ?: aspect),
         )
 
         if (overlay && tile != null) {

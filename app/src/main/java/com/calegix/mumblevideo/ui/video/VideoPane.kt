@@ -287,7 +287,7 @@ private fun VideoTile(tile: StreamTile, autoSubscribe: Boolean, playback: Stream
                     stream.key,
                     playback::attachSurface,
                     playback::detachSurface,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fitAspect(streamAspect(stream)),
                 )
             } else {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {

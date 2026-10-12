@@ -8,8 +8,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.viewinterop.AndroidView
 import com.calegix.mumblevideo.core.StreamKey
+import kotlin.math.roundToInt
 
 /**
  * A SurfaceView whose surface is handed to the core for [stream]. The core decodes and renders
@@ -50,4 +53,34 @@ fun VideoSurface(
             modifier = modifier,
         )
     }
+}
+
+/**
+ * Sizes content to [aspect] (width / height) inside the space it is given, as large as fits:
+ * letterboxed or pillarboxed, never stretched. The decoder and the camera preview both scale to
+ * whatever surface they get, so the surface itself must have the picture's shape.
+ */
+fun Modifier.fitAspect(aspect: Float): Modifier = this.then(
+    Modifier.layout { measurable, constraints ->
+        val maxW = constraints.maxWidth.toFloat()
+        val maxH = constraints.maxHeight.toFloat()
+        val (w, h) = when {
+            !maxH.isFinite() || maxH >= Constraints.Infinity -> maxW to maxW / aspect
+            maxW / maxH > aspect -> maxH * aspect to maxH
+            else -> maxW to maxW / aspect
+        }
+        val placeable = measurable.measure(Constraints.fixed(w.roundToInt(), h.roundToInt()))
+        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    },
+)
+
+/** A stream's shape: what the decoder last reported, else what was announced, else 16:9. */
+fun streamAspect(stream: com.calegix.mumblevideo.core.VideoStream): Float {
+    val active = stream.subscription as? com.calegix.mumblevideo.core.Subscription.Active
+    val (w, h) = if (active != null && active.decodedWidth > 0 && active.decodedHeight > 0) {
+        active.decodedWidth to active.decodedHeight
+    } else {
+        stream.width to stream.height
+    }
+    return if (w > 0 && h > 0) w.toFloat() / h else 16f / 9f
 }
