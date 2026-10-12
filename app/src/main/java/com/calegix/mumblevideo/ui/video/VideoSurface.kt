@@ -74,6 +74,23 @@ fun Modifier.fitAspect(aspect: Float): Modifier = this.then(
     },
 )
 
+/**
+ * Sizes content to [aspect] so it covers the whole space it is given, centred, with whatever
+ * spills over cut off by the screen edge: YouTube's "zoomed to fill". Only for full-screen use,
+ * since a SurfaceView is not clipped by Compose.
+ */
+fun Modifier.fillAspect(aspect: Float): Modifier = this.then(
+    Modifier.layout { measurable, constraints ->
+        val maxW = constraints.maxWidth.toFloat()
+        val maxH = constraints.maxHeight.toFloat()
+        val (w, h) = if (maxW / maxH > aspect) maxW to maxW / aspect else maxH * aspect to maxH
+        val placeable = measurable.measure(Constraints.fixed(w.roundToInt(), h.roundToInt()))
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            placeable.place(((maxW - w) / 2).roundToInt(), ((maxH - h) / 2).roundToInt())
+        }
+    },
+)
+
 /** A stream's shape: what the decoder last reported, else what was announced, else 16:9. */
 fun streamAspect(stream: com.calegix.mumblevideo.core.VideoStream): Float {
     val active = stream.subscription as? com.calegix.mumblevideo.core.Subscription.Active

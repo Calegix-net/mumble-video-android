@@ -2,6 +2,9 @@ package com.calegix.mumblevideo.ui.video
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.VolumeOff
@@ -33,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -42,6 +47,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.calegix.mumblevideo.core.StreamKey
 import com.calegix.mumblevideo.core.Subscription
 import com.calegix.mumblevideo.ui.AppViewModelProvider
+import kotlinx.coroutines.delay
 
 /** One stream, edge to edge on black, with share-audio controls. Tap toggles the overlay. */
 @Composable
@@ -63,11 +69,40 @@ fun FullscreenVideoScreen(
         onDispose { viewModel.release(stream) }
     }
     var overlay by rememberSaveable { mutableStateOf(true) }
+    // Pinch out to fill the screen (cropping), pinch in for the whole picture, as in YouTube.
+    var fill by rememberSaveable { mutableStateOf(false) }
+    var zoomHint by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(zoomHint) {
+        if (zoomHint != null) {
+            delay(ZOOM_HINT_MS)
+            zoomHint = null
+        }
+    }
 
     Box(
         modifier
             .fillMaxSize()
             .background(Color.Black)
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var zoom = 1f
+                    do {
+                        val event = awaitPointerEvent()
+                        if (event.changes.count { it.pressed } >= 2) {
+                            zoom *= event.calculateZoom()
+                            event.changes.forEach { it.consume() }
+                        }
+                    } while (event.changes.any { it.pressed })
+                    if (zoom > PINCH_THRESHOLD && !fill) {
+                        fill = true
+                        zoomHint = "Zoomed to fill"
+                    } else if (zoom < 1 / PINCH_THRESHOLD && fill) {
+                        fill = false
+                        zoomHint = "Original"
+                    }
+                }
+            }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                 overlay =
                     !overlay
@@ -81,8 +116,21 @@ fun FullscreenVideoScreen(
             stream,
             viewModel::attachSurface,
             viewModel::detachSurface,
-            Modifier.fitAspect(tile?.stream?.let(::streamAspect) ?: aspect),
+            (tile?.stream?.let(::streamAspect) ?: aspect).let { shape ->
+                if (fill) Modifier.fillAspect(shape) else Modifier.fitAspect(shape)
+            },
         )
+
+        zoomHint?.let { hint ->
+            Text(
+                hint,
+                color = Color.White,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier
+                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
 
         if (overlay && tile != null) {
             Column(Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -120,6 +168,9 @@ fun FullscreenVideoScreen(
         }
     }
 }
+
+private const val PINCH_THRESHOLD = 1.15f
+private const val ZOOM_HINT_MS = 1200L
 
 @Composable
 private fun ShareAudioControls(volume: Float, muted: Boolean, onChange: (Float, Boolean) -> Unit) {
