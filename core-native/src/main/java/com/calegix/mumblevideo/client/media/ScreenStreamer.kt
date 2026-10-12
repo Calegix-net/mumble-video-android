@@ -110,8 +110,10 @@ class ScreenStreamer(
         if ((width > height) == (outputWidth > outputHeight)) return
         val old = encoder
         val input = startEncoder(width, height)
-        display?.resize(width, height, context.resources.displayMetrics.densityDpi)
+        // Surface first: the system fits the mirrored screen to the surface size it sees when the
+        // display is resized, so resizing onto the old surface keeps the old shape's letterbox.
         display?.surface = input
+        display?.resize(width, height, context.resources.displayMetrics.densityDpi)
         old?.let {
             runCatching { it.stop() }
             it.release()
