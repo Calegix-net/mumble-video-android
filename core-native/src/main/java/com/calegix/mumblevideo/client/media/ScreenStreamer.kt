@@ -14,6 +14,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
+import android.view.Display
 import android.view.Surface
 import android.view.WindowManager
 import com.calegix.mumblevideo.core.VideoCodec
@@ -25,7 +26,9 @@ import kotlin.math.roundToInt
  * [CameraStreamer.EncodedFrame]s, the same shape as the camera, for the same send path.
  *
  * The stream keeps the screen's aspect ratio, scaled so its longer side is at most the requested
- * size's; turning the phone mid-share letterboxes rather than changing the stream.
+ * size's. When the phone turns, the encoder is rebuilt at the new shape and the virtual display
+ * resized to it, and [onReshaped] tells the caller, which has to announce a new stream (the
+ * protocol carries a size change as one). Frames from the new encoder follow that call.
  */
 class ScreenStreamer(
     private val context: Context,
@@ -33,6 +36,7 @@ class ScreenStreamer(
     val config: Config,
     private val onFrame: (CameraStreamer.EncodedFrame) -> Unit,
     private val onError: (String) -> Unit,
+    private val onReshaped: (width: Int, height: Int) -> Unit = { _, _ -> },
 ) : AutoCloseable {
     data class Config(
         val width: Int,
@@ -63,11 +67,65 @@ class ScreenStreamer(
         }
     }
 
+    private var encoderName = ""
+
+    private val displays = context.getSystemService(DisplayManager::class.java)
+
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+
+        override fun onDisplayRemoved(displayId: Int) = Unit
+
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId == Display.DEFAULT_DISPLAY && !closed) reshapeIfTurned()
+        }
+    }
+
     fun start() {
+        val (width, height) = targetSize()
+        val input = startEncoder(width, height)
+        projection.registerCallback(projectionCallback, handler)
+        display = projection.createVirtualDisplay(
+            "MumbleVideoScreen",
+            width,
+            height,
+            context.resources.displayMetrics.densityDpi,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            input,
+            null,
+            handler,
+        )
+        displays.registerDisplayListener(displayListener, handler)
+        Log.i(TAG, "sharing the screen at ${width}x$height@${config.framerate} with $encoderName")
+    }
+
+    private fun targetSize(): Pair<Int, Int> {
         val (screenWidth, screenHeight) = screenSize()
-        val (width, height) = streamSize(screenWidth, screenHeight, maxOf(config.width, config.height))
+        return streamSize(screenWidth, screenHeight, maxOf(config.width, config.height))
+    }
+
+    /** Runs on the streamer's thread, so no frame of the old encoder races the new one. */
+    private fun reshapeIfTurned() {
+        val (width, height) = targetSize()
+        if ((width > height) == (outputWidth > outputHeight)) return
+        val old = encoder
+        val input = startEncoder(width, height)
+        display?.resize(width, height, context.resources.displayMetrics.densityDpi)
+        display?.surface = input
+        old?.let {
+            runCatching { it.stop() }
+            it.release()
+        }
+        Log.i(TAG, "screen turned: now ${width}x$height")
+        onReshaped(width, height)
+    }
+
+    /** A running encoder at [width]x[height]; returns its input surface. */
+    private fun startEncoder(width: Int, height: Int): Surface {
         outputWidth = width
         outputHeight = height
+        frameNumber = 0
+        configBytes = null
         val mime = when (config.codec) {
             VideoCodec.H264 -> MediaFormat.MIMETYPE_VIDEO_AVC
             else -> MediaFormat.MIMETYPE_VIDEO_VP8
@@ -90,11 +148,13 @@ class ScreenStreamer(
             object : MediaCodec.Callback() {
                 override fun onInputBufferAvailable(codec: MediaCodec, index: Int) = Unit // surface input
 
-                override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) =
-                    handleOutput(codec, index, info)
+                override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
+                    if (codec === encoder) handleOutput(codec, index, info) else codec.releaseOutputBuffer(index, false)
+                }
 
-                override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) =
-                    onError("Encoder failed: ${e.diagnosticInfo}")
+                override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
+                    if (codec === encoder) onError("Encoder failed: ${e.diagnosticInfo}")
+                }
 
                 override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) = Unit
             },
@@ -104,19 +164,8 @@ class ScreenStreamer(
         val input = codec.createInputSurface()
         codec.start()
         encoder = codec
-
-        projection.registerCallback(projectionCallback, handler)
-        display = projection.createVirtualDisplay(
-            "MumbleVideoScreen",
-            width,
-            height,
-            context.resources.displayMetrics.densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            input,
-            null,
-            handler,
-        )
-        Log.i(TAG, "sharing the screen at ${width}x$height@${config.framerate} with ${info.name}")
+        encoderName = info.name
+        return input
     }
 
     private fun screenSize(): Pair<Int, Int> {
@@ -168,6 +217,7 @@ class ScreenStreamer(
     override fun close() {
         if (closed) return
         closed = true
+        displays.unregisterDisplayListener(displayListener)
         display?.release()
         display = null
         encoder?.let {

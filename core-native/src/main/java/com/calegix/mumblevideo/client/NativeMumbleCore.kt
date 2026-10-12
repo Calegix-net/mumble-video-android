@@ -1190,6 +1190,8 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
 
         @Volatile private var screenKey: StreamKey? = null
 
+        @Volatile private var screenStreamId = -1
+
         @Volatile private var screenAudio: ScreenAudioStreamer? = null
 
         @Volatile private var screenAudioKey: StreamKey? = null
@@ -1200,6 +1202,8 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             val streamId = nextStreamId++
             val key = StreamKey(me, streamId)
             val codec = request.codec ?: VideoCodec.VP8
+            val name = "${android.os.Build.MODEL} screen"
+            screenStreamId = streamId
             val streamer = ScreenStreamer(
                 context = context,
                 projection = projection,
@@ -1210,11 +1214,12 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                     bitrate = sendBitrate(request.maxBandwidth, request.width, request.height),
                     codec = codec,
                 ),
-                onFrame = { frame -> sendVideoFrame(streamId, frame) },
+                onFrame = { frame -> sendVideoFrame(screenStreamId, frame) },
                 onError = { reason ->
                     Log.w(TAG, "screen share stopped: $reason")
                     scope.launch(Dispatchers.Default) { stopScreen() }
                 },
+                onReshaped = { width, height -> reannounceScreen(me, name, width, height) },
             )
             try {
                 streamer.start()
@@ -1224,7 +1229,6 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             }
             screen = streamer
             screenKey = key
-            val name = "${android.os.Build.MODEL} screen"
             announceLocal(
                 key,
                 codec,
@@ -1241,6 +1245,49 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 )
             }
             if (request.includeAudio) startScreenAudio(me, key, name, projection)
+        }
+
+        /**
+         * The phone turned mid-share and the picture changed shape: that is a new stream in the
+         * protocol, so withdraw the old one and announce its successor. The sound stream carries on
+         * unchanged but is announced again, since viewers attach it to the screen stream they know.
+         */
+        private fun reannounceScreen(me: UserSession, name: String, width: Int, height: Int) {
+            val streamer = screen ?: return
+            val oldKey = screenKey ?: return
+            val audio = _videoStreams.value.firstOrNull { it.key == oldKey }?.audio
+            val streamId = nextStreamId++
+            val key = StreamKey(me, streamId)
+            withdrawLocal(oldKey, announce = true)
+            screenStreamId = streamId
+            screenKey = key
+            val framerate = streamer.config.framerate
+            announceLocal(
+                key,
+                streamer.config.codec,
+                VideoSourceKind.Display,
+                name,
+                width,
+                height,
+                framerate,
+                streamer.config.bitrate,
+            )
+            _localVideo.update {
+                it.copy(screen = LocalStream(key, width, height, framerate, streamer.config.codec))
+            }
+            if (audio != null) {
+                send(
+                    ControlType.VIDEO_STATE,
+                    MumbleProto.VideoState.newBuilder()
+                        .setStreamId(audio.audioStreamId)
+                        .setActive(true)
+                        .setCodec(MumbleProto.VideoState.Codec.OpusAudio)
+                        .setSourceKind(MumbleProto.VideoState.SourceKind.Display)
+                        .setSourceName(name)
+                        .build(),
+                )
+                _videoStreams.update { streams -> streams.map { if (it.key == key) it.copy(audio = audio) else it } }
+            }
         }
 
         /**
