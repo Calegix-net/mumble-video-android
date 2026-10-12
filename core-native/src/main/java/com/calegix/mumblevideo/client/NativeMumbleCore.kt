@@ -16,6 +16,7 @@ import android.view.Surface
 import com.calegix.mumblevideo.client.audio.AudioCapture
 import com.calegix.mumblevideo.client.audio.AudioPlayback
 import com.calegix.mumblevideo.client.audio.AudioRouting
+import com.calegix.mumblevideo.client.audio.StreamAudioPlayer
 import com.calegix.mumblevideo.client.crypto.OcbCrypt
 import com.calegix.mumblevideo.client.media.CameraStreamer
 import com.calegix.mumblevideo.client.media.FrameCounter
@@ -368,6 +369,12 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         private val media = MumbleCoreMedia()
         private val decoders = ConcurrentHashMap<StreamKey, VideoDecoder>()
         private val surfaces = ConcurrentHashMap<StreamKey, Surface>()
+
+        /** Sound of screen shares we watch, keyed by the audio stream, not the picture. */
+        private val streamAudio = ConcurrentHashMap<StreamKey, StreamAudioPlayer>()
+
+        /** Share audio announced before its picture stream; folded in once the picture shows up. */
+        private val orphanAudio = ConcurrentHashMap<UserSession, Int>()
         private val lastKeyframeAsk = ConcurrentHashMap<StreamKey, Long>()
         private val frameCounters = ConcurrentHashMap<StreamKey, FrameCounter>()
         private var udp: UdpChannel? = null
@@ -564,14 +571,17 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
 
                 ControlType.VIDEO_STATE -> {
                     markVideoCapable("VideoState received")
+                    val msg = MumbleProto.VideoState.parseFrom(p)
                     val before = _videoStreams.value.map { it.key }.toSet()
-                    _videoStreams.update { SessionReducer.videoState(it, MumbleProto.VideoState.parseFrom(p), self) }
+                    _videoStreams.update { SessionReducer.videoState(it, msg, self) }
+                    adoptOrphanAudio(msg)
                     val after = _videoStreams.value.map { it.key }.toSet()
                     (after - before).forEach { _events.tryEmit(CoreEvent.StreamStarted(it)) }
                     (before - after).forEach {
                         closeDecoder(it)
                         _events.tryEmit(CoreEvent.StreamEnded(it))
                     }
+                    syncStreamAudio()
                 }
 
                 else -> Unit // CodecVersion, PermissionQuery, UserStats, ACL...: not needed yet
@@ -922,6 +932,9 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             stopCamera(announce = false)
             stopScreen(announce = false)
             decoders.keys.toList().forEach(::closeDecoder)
+            streamAudio.values.forEach(StreamAudioPlayer::close)
+            streamAudio.clear()
+            orphanAudio.clear()
             synchronized(media) { media.close() }
             micRelease?.cancel()
             capture?.stop()
@@ -941,7 +954,9 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
 
         private fun dispatchMedia(events: MediaEvents) {
             events.video.forEach { unit ->
-                decoders[StreamKey(UserSession(unit.senderSession), unit.streamId)]?.submit(unit)
+                val key = StreamKey(UserSession(unit.senderSession), unit.streamId)
+                val player = streamAudio[key]
+                if (player != null) player.push(unit.payload) else decoders[key]?.submit(unit)
             }
             events.datagramsToSend.forEach { udp?.sendRaw(it) }
             events.controlToSend.forEach { outbox.offer(it) }
@@ -967,12 +982,66 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             }
             sendSubscribe(key, subscribe = true, keyframe = true, bandwidth = preferredBandwidth)
             Log.i(TAG, "subscribed to $key (${stream.codec} ${stream.width}x${stream.height})")
+            syncStreamAudio()
         }
 
         fun unsubscribe(key: StreamKey) {
             closeDecoder(key)
             sendSubscribe(key, subscribe = false, keyframe = false, bandwidth = 0)
             setSubscription(key, Subscription.None)
+            syncStreamAudio()
+        }
+
+        /**
+         * Plays the sound of every screen share we are watching, and only those: subscribes to the
+         * share's audio stream alongside the picture and drops it when the picture goes. Also applies
+         * the volume and mute the viewer picked. Cheap; called after anything that could change it.
+         */
+        @Synchronized
+        fun syncStreamAudio() {
+            val wanted = _videoStreams.value
+                .filter { it.audio != null && decoders.containsKey(it.key) }
+                .associateBy { StreamKey(it.key.session, it.audio!!.audioStreamId) }
+            streamAudio.keys.filterNot(wanted::containsKey).forEach { key ->
+                streamAudio.remove(key)?.close()
+                sendSubscribe(key, subscribe = false, keyframe = false, bandwidth = 0)
+                Log.i(TAG, "stopped share audio $key")
+            }
+            wanted.forEach { (key, stream) ->
+                val player = streamAudio.getOrPut(key) {
+                    sendSubscribe(key, subscribe = true, keyframe = false, bandwidth = 0)
+                    Log.i(TAG, "playing share audio $key with ${stream.key}")
+                    StreamAudioPlayer()
+                }
+                val audio = stream.audio ?: return@forEach
+                player.volume = audio.volume
+                player.muted = audio.muted
+            }
+        }
+
+        /** Keeps share audio whose picture stream we haven't heard of yet, and folds it in later. */
+        private fun adoptOrphanAudio(msg: MumbleProto.VideoState) {
+            if (!msg.hasSession() || !msg.hasStreamId()) return
+            val session = UserSession(msg.session)
+            val streams = _videoStreams.value
+            if (msg.codec == MumbleProto.VideoState.Codec.OpusAudio) {
+                val folded = streams.any { it.key.session == session && it.audio?.audioStreamId == msg.streamId }
+                if (msg.active && !folded) orphanAudio[session] = msg.streamId
+                if (!msg.active) orphanAudio.remove(session, msg.streamId)
+                return
+            }
+            val audioId = orphanAudio[session] ?: return
+            if (streams.none { it.key.session == session && it.sourceKind.isScreen && it.audio == null }) return
+            orphanAudio.remove(session)
+            _videoStreams.update { list ->
+                list.map { s ->
+                    if (s.key.session == session && s.sourceKind.isScreen && s.audio == null) {
+                        s.copy(audio = StreamAudio(audioStreamId = audioId))
+                    } else {
+                        s
+                    }
+                }
+            }
         }
 
         fun setSurface(key: StreamKey, surface: Surface?) {
@@ -1024,6 +1093,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             if (!echo.subscribe && decoders.containsKey(key)) {
                 closeDecoder(key)
                 setSubscription(key, Subscription.Failed("You don't have permission to watch this stream"))
+                syncStreamAudio()
             }
         }
 
@@ -1609,6 +1679,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 }
             }
         }
+        link?.syncStreamAudio()
     }
 
     override suspend fun availableCameras(): List<CameraOption> = withContext(Dispatchers.Default) {
