@@ -141,12 +141,9 @@ internal class AudioPlayback {
                 if (++tick % 500 == 0) {
                     if (framesDecoded != reportedFrames) {
                         val db = if (windowPeak > 0) 20 * log10(windowPeak / 32768.0) else Double.NEGATIVE_INFINITY
-                        Log.i(
-                            TAG,
-                            "played: ${framesDecoded - reportedFrames} frames decoded, $framesConcealed concealed in total, peak %.1f dBFS".format(
-                                db,
-                            ),
-                        )
+                        val decoded = framesDecoded - reportedFrames
+                        val summary = "played: $decoded frames decoded, $framesConcealed concealed so far"
+                        Log.i(TAG, "$summary, peak %.1f dBFS".format(db))
                         reportedFrames = framesDecoded
                     }
                     windowPeak = 0
