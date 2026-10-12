@@ -323,7 +323,8 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         private val inbox = Channel<ControlMessage>(Channel.UNLIMITED)
         private val crypt = OcbCrypt()
         private var udp: UdpChannel? = null
-        private var capture: AudioCapture? = null
+
+        @Volatile private var capture: AudioCapture? = null
         private var playback: AudioPlayback? = null
         private var self: UserSession? = null
         private var serverVersion: MumbleProto.Version? = null
