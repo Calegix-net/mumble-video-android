@@ -4,8 +4,10 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Process
+import android.util.Log
 import com.calegix.mumblevideo.core.AudioOutputStream
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.log10
 
 /**
  * Received voice to the speaker: one jitter buffer and Opus decoder per talking user, mixed every
@@ -107,6 +109,9 @@ internal class AudioPlayback {
         val mix = IntArray(FRAME)
         val out = ShortArray(FRAME)
         val scratch = ShortArray(Opus.SAMPLE_RATE / 10)
+        var reportedFrames = 0L
+        var windowPeak = 0
+        var tick = 0
         track.play()
         try {
             while (running) {
@@ -131,6 +136,21 @@ internal class AudioPlayback {
                     }
                 }
                 lastPeak = peak / 32768f
+                if (peak > windowPeak) windowPeak = peak
+                // Every 5 s of playback, if anything was heard: enough to verify receive in logcat.
+                if (++tick % 500 == 0) {
+                    if (framesDecoded != reportedFrames) {
+                        val db = if (windowPeak > 0) 20 * log10(windowPeak / 32768.0) else Double.NEGATIVE_INFINITY
+                        Log.i(
+                            TAG,
+                            "played: ${framesDecoded - reportedFrames} frames decoded, $framesConcealed concealed in total, peak %.1f dBFS".format(
+                                db,
+                            ),
+                        )
+                        reportedFrames = framesDecoded
+                    }
+                    windowPeak = 0
+                }
                 track.write(out, 0, FRAME)
             }
         } finally {
@@ -188,6 +208,7 @@ internal class AudioPlayback {
     }
 
     companion object {
+        private const val TAG = "MvAudio"
         const val FRAME = 480
         private const val MAX_CONCEAL = 3
     }
