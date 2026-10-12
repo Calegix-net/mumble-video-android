@@ -74,7 +74,7 @@ class CameraMathTest {
         assertEquals(0, CameraMath.textureRotation(sensorOrientation = 90, displayRotation = 0, frontFacing = false))
         assertEquals(0, CameraMath.textureRotation(sensorOrientation = 270, displayRotation = 0, frontFacing = true))
         // Turned to landscape: a quarter turn, but the output is still sized by the full rotation.
-        assertEquals(270, CameraMath.textureRotation(sensorOrientation = 90, displayRotation = 90, frontFacing = false))
+        assertEquals(90, CameraMath.textureRotation(sensorOrientation = 90, displayRotation = 90, frontFacing = false))
         assertEquals(1280 to 720, CameraMath.uprightSize(1280, 720, CameraMath.uprightRotation(90, 90, false)))
     }
 }

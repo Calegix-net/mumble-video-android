@@ -63,7 +63,9 @@ internal object CameraMath {
      * [uprightRotation] in full on top of that transform turns the picture a quarter too far.
      */
     fun textureRotation(sensorOrientation: Int, displayRotation: Int, frontFacing: Boolean): Int =
-        ((uprightRotation(sensorOrientation, displayRotation, frontFacing) - sensorOrientation) % 360 + 360) % 360
+        // The texture matrix turns the sampled image the other way from the output, so the device
+        // part is applied negated (measured on a Pixel 9 Pro: without it, landscape is upside down).
+        ((sensorOrientation - uprightRotation(sensorOrientation, displayRotation, frontFacing)) % 360 + 360) % 360
 
     /** Size of the upright image: a quarter turn swaps the sides. */
     fun uprightSize(width: Int, height: Int, rotation: Int): Pair<Int, Int> =
