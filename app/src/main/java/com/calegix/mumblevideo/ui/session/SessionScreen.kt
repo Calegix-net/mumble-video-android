@@ -4,9 +4,12 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -50,6 +53,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -80,7 +85,7 @@ import com.calegix.mumblevideo.ui.video.VideoPane
 
 private enum class SessionTab(val label: String) { Channels("Channels"), Chat("Chat"), Video("Video") }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SessionScreen(
     onOpenSettings: () -> Unit,
@@ -102,8 +107,15 @@ fun SessionScreen(
 
     // Expanded width (tablets, unfolded foldables, landscape large screens): channels and chat
     // sit side by side as list and detail, so Chat drops out of the navigation.
-    val wide = currentWindowAdaptiveInfoV2().windowSizeClass
-        .isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_EXPANDED_LOWER_BOUND)
+    val adaptiveInfo = currentWindowAdaptiveInfoV2()
+    val wide = adaptiveInfo.windowSizeClass.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_EXPANDED_LOWER_BOUND)
+    // While typing, the bottom bar would sit between the composer and the keyboard; hide it.
+    val imeVisible = WindowInsets.isImeVisible
+    val suiteType = if (imeVisible && !wide) {
+        NavigationSuiteType.None
+    } else {
+        NavigationSuiteScaffoldDefaults.navigationSuiteType(adaptiveInfo)
+    }
     var tab by rememberSaveable { mutableStateOf(SessionTab.Channels) }
     if (wide && tab == SessionTab.Chat) tab = SessionTab.Channels
     val chatVisible = tab == SessionTab.Chat || (wide && tab == SessionTab.Channels)
@@ -141,6 +153,7 @@ fun SessionScreen(
     ) { padding ->
         NavigationSuiteScaffold(
             modifier = Modifier.padding(top = padding.calculateTopPadding()),
+            layoutType = suiteType,
             navigationSuiteItems = {
                 SessionTab.entries.filter { !(wide && it == SessionTab.Chat) }.forEach { item ->
                     item(

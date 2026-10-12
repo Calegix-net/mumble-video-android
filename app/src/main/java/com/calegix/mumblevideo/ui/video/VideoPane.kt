@@ -1,10 +1,12 @@
 package com.calegix.mumblevideo.ui.video
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -26,7 +28,6 @@ import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.VideocamOff
 import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -196,9 +197,20 @@ private fun WatchingList(watchers: List<Watcher>) {
                 modifier = Modifier.padding(start = 8.dp),
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
-            watchers.take(6).forEach { watcher ->
-                AssistChip(onClick = {}, label = { Text("${watcher.name} · ${watcher.streams.joinToString()}") })
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(top = 8.dp),
+        ) {
+            // Plain labels, not chips: there is nothing to do with a watcher yet.
+            watchers.forEach { watcher ->
+                Text(
+                    "${watcher.name} · ${watcher.streams.joinToString()}",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
             }
         }
     }

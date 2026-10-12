@@ -100,32 +100,32 @@ private fun MessageBubble(entry: ChatEntry) {
         DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(message.timestampEpochMillis))
     }
     val body = remember(message.html) { AnnotatedString.fromHtml(message.html) }
+    val scheme = MaterialTheme.colorScheme
+    val (container, content) = when {
+        own -> scheme.primaryContainer to scheme.onPrimaryContainer
+        private -> scheme.tertiaryContainer to scheme.onTertiaryContainer
+        else -> scheme.surfaceContainerHigh to scheme.onSurface
+    }
+    val secondary = content.copy(alpha = 0.75f)
     Box(Modifier.fillMaxWidth(), contentAlignment = if (own) Alignment.CenterEnd else Alignment.CenterStart) {
         Column(
             Modifier
                 .widthIn(max = 480.dp)
-                .background(
-                    when {
-                        own -> MaterialTheme.colorScheme.primaryContainer
-                        private -> MaterialTheme.colorScheme.tertiaryContainer
-                        else -> MaterialTheme.colorScheme.surfaceContainerHigh
-                    },
-                    RoundedCornerShape(16.dp),
-                )
+                .background(container, RoundedCornerShape(16.dp))
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             Text(
                 if (own) "You → ${entry.targetLabel}" else "${message.senderName} → ${entry.targetLabel}",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = secondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(body, style = MaterialTheme.typography.bodyLarge)
+            Text(body, style = MaterialTheme.typography.bodyLarge, color = content)
             Text(
                 time,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = secondary,
                 modifier = Modifier.align(Alignment.End),
             )
         }

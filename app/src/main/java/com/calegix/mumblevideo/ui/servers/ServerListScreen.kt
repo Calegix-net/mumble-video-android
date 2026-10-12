@@ -136,6 +136,8 @@ fun ServerListScreen(
                 onClick = { viewModel.addServer() },
                 icon = { Icon(Icons.Outlined.Add, contentDescription = null) },
                 text = { Text("Add server") },
+                // The animated label doesn't reach the accessibility tree on its own.
+                modifier = Modifier.semantics { contentDescription = "Add server" },
             )
         },
     ) { padding ->

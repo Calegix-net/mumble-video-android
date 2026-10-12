@@ -31,9 +31,11 @@ import androidx.compose.material.icons.outlined.MicOff
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,6 +95,27 @@ private fun ChannelRowItem(row: TreeRow.ChannelRow, settings: AppSettings, onJoi
         busy -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
         else -> Color.Transparent
     }
+    // Text on a container must use the container's paired colour, or it can vanish on some
+    // dynamic palettes.
+    val content = when {
+        row.isCurrent -> MaterialTheme.colorScheme.onSecondaryContainer
+        busy -> MaterialTheme.colorScheme.onTertiaryContainer
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    CompositionLocalProvider(LocalContentColor provides content) {
+        ChannelRowContent(row, settings, background, onJoin, onToggle)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ChannelRowContent(
+    row: TreeRow.ChannelRow,
+    settings: AppSettings,
+    background: Color,
+    onJoin: () -> Unit,
+    onToggle: () -> Unit,
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -145,7 +168,7 @@ private fun ChannelRowItem(row: TreeRow.ChannelRow, settings: AppSettings, onJoi
                     row.totalUsers.toString()
                 },
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = LocalContentColor.current.copy(alpha = 0.75f),
                 modifier = Modifier.padding(start = 8.dp),
             )
         }

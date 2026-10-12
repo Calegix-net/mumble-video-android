@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -42,6 +43,7 @@ fun PushToTalkButton(
         if (active) TalkColors.Talking else MaterialTheme.colorScheme.primaryContainer,
         label = "ptt",
     )
+    val content = if (active) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
@@ -71,10 +73,11 @@ fun PushToTalkButton(
             },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.Mic, contentDescription = null)
+            Icon(Icons.Outlined.Mic, contentDescription = null, tint = content)
             Text(
                 if (active) "Talking" else "Hold to talk",
                 style = MaterialTheme.typography.titleMedium,
+                color = content,
                 modifier = Modifier.padding(start = 8.dp),
             )
         }
