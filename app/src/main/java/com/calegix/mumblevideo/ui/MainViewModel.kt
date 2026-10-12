@@ -63,6 +63,30 @@ class MainViewModel(
         }
     }
 
+    private val _sharedPicture = MutableStateFlow<SharedPicture?>(null)
+
+    /** A picture shared to the app from elsewhere, waiting for the user to confirm where it goes. */
+    val sharedPicture: StateFlow<SharedPicture?> = _sharedPicture.asStateFlow()
+
+    fun onPictureShared(uri: String) {
+        val state = session.core.serverState.value
+        val channel = state.selfUser?.channel?.let { state.channels[it] }
+        _sharedPicture.value = SharedPicture(uri, channel?.name)
+    }
+
+    fun dismissSharedPicture() {
+        _sharedPicture.value = null
+    }
+
+    /** Sends the shared picture; [encode] gets the server's image limit (see ChatImages.toMessage). */
+    fun sendSharedPicture(encode: suspend (limit: Int) -> String?) {
+        _sharedPicture.value = null
+        viewModelScope.launch {
+            val html = encode(imageLimit()) ?: return@launch
+            post(null, html)
+        }
+    }
+
     fun answerCertificate(accept: Boolean) {
         viewModelScope.launch { session.answerCertificatePrompt(accept) }
     }
@@ -110,6 +134,9 @@ class MainViewModel(
         else -> null
     }
 }
+
+/** A picture shared into the app; [channel] is where it would go, null when not connected. */
+data class SharedPicture(val uri: String, val channel: String?)
 
 /** Parses `mumble://[user[:password]@]host[:port][/path]` links. */
 object MumbleUrl {

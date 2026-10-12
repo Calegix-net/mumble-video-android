@@ -7,6 +7,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.GppMaybe
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -92,4 +93,26 @@ private fun rejectTitle(reason: RejectReason): String = when (reason) {
     RejectReason.NoCertificate -> "Certificate required"
     RejectReason.WrongVersion -> "Incompatible version"
     RejectReason.AuthenticatorFail, RejectReason.None -> "Connection rejected"
+}
+
+@Composable
+fun SharedPictureDialog(picture: SharedPicture, onSend: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.Image, contentDescription = null) },
+        title = { Text("Send picture") },
+        text = {
+            Text(
+                if (picture.channel != null) {
+                    "Send this picture to #${picture.channel}? It is shrunk to fit the server's limit."
+                } else {
+                    "Connect to a server first, then share the picture again."
+                },
+            )
+        },
+        confirmButton = {
+            if (picture.channel != null) TextButton(onClick = onSend) { Text("Send") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (picture.channel != null) "Cancel" else "OK") } },
+    )
 }

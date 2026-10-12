@@ -2,6 +2,7 @@ package com.calegix.mumblevideo.ui
 
 import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -19,12 +20,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.core.content.IntentCompat
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.calegix.mumblevideo.BuildConfig
 import com.calegix.mumblevideo.core.ConnectionState
 import com.calegix.mumblevideo.ui.navigation.AppNavHost
 import com.calegix.mumblevideo.ui.session.ChatImages
+import com.calegix.mumblevideo.ui.session.loadPicture
 import com.calegix.mumblevideo.ui.theme.MumbleVideoTheme
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +62,7 @@ class MainActivity : ComponentActivity() {
             val connection by viewModel.connectionState.collectAsStateWithLifecycle()
             val dialog by viewModel.dialog.collectAsStateWithLifecycle()
             val link by viewModel.pendingLink.collectAsStateWithLifecycle()
+            val shared by viewModel.sharedPicture.collectAsStateWithLifecycle()
 
             val keepOn = settings.keepScreenOn && connection is ConnectionState.Connected
             LaunchedEffect(keepOn) {
@@ -79,6 +84,21 @@ class MainActivity : ComponentActivity() {
                         pendingLink = link,
                         onConsumeLink = viewModel::consumeLink,
                     )
+                    shared?.let { picture ->
+                        SharedPictureDialog(
+                            picture = picture,
+                            onSend = {
+                                viewModel.sendSharedPicture { limit ->
+                                    withContext(Dispatchers.Default) {
+                                        loadPicture(this@MainActivity, picture.uri.toUri())?.let {
+                                            ChatImages.toMessage(it, limit)
+                                        }
+                                    }
+                                }
+                            },
+                            onDismiss = viewModel::dismissSharedPicture,
+                        )
+                    }
                     dialog?.let {
                         ConnectionDialogHost(
                             dialog = it,
@@ -99,6 +119,11 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?) {
         if (intent?.action == Intent.ACTION_VIEW) intent.dataString?.let(viewModel::onMumbleLink)
         if (BuildConfig.DEBUG && intent?.action == ACTION_DEBUG_POST) debugPost(intent)
+        if (intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("image/") == true) {
+            IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let {
+                viewModel.onPictureShared(it.toString())
+            }
+        }
     }
 
     /**
