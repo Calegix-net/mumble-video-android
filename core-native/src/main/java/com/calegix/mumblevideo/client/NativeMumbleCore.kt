@@ -87,6 +87,8 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -767,24 +769,17 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 it.deafened = _voiceState.value.selfDeafened
                 it.start(config.outputStream)
             }
-            val granted =
+            micGranted =
                 context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-            if (!granted) {
-                Log.i(TAG, "no microphone permission: listen only")
-                return
-            }
-            capture = AudioCapture(
-                sink = ::sendVoice,
-                levels = ::onLevel,
-            ).also {
-                it.config = config
-                it.muted = _voiceState.value.selfMuted
-                it.pushToTalk = _voiceState.value.pushToTalkActive
-                if (!it.start()) Log.w(TAG, "microphone unavailable")
-            }
+            if (!micGranted) Log.i(TAG, "no microphone permission: listen only")
             monitor?.stop()
             monitor = null
+            updateMicrophone()
         }
+
+        private var micGranted = false
+        private val micLock = Mutex()
+        private var micRelease: Job? = null
 
         fun applyVoiceToAudio() {
             val voice = _voiceState.value
@@ -792,6 +787,37 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             capture?.pushToTalk = voice.pushToTalkActive
             capture?.config = audioConfig
             playback?.deafened = voice.selfDeafened
+            updateMicrophone()
+        }
+
+        /**
+         * The microphone is open only while it could transmit: unmuted, and either voice activity
+         * or continuous mode, or push-to-talk held. So the privacy indicator means what it says,
+         * and a muted or idle push-to-talk session costs no capture. On release it stays open a
+         * moment longer, so the end-of-speech packet still goes out.
+         */
+        private fun updateMicrophone() {
+            val voice = _voiceState.value
+            val wanted = micGranted && !voice.selfMuted &&
+                (voice.inputMode != VoiceInputMode.PushToTalk || voice.pushToTalkActive)
+            micRelease?.cancel()
+            micRelease = scope.launch(Dispatchers.IO) {
+                if (!wanted) delay(MIC_RELEASE_DELAY_MS)
+                micLock.withLock {
+                    if (wanted && capture == null) {
+                        capture = AudioCapture(sink = ::sendVoice, levels = ::onLevel).also {
+                            it.config = audioConfig
+                            it.muted = voice.selfMuted
+                            it.pushToTalk = voice.pushToTalkActive
+                            if (!it.start()) Log.w(TAG, "microphone unavailable")
+                        }
+                    } else if (!wanted && capture != null) {
+                        capture?.stop()
+                        capture = null
+                        if (_voiceState.value.transmitting) onLevel(0f, false)
+                    }
+                }
+            }
         }
 
         private fun sendVoice(opus: ByteArray, frames: Int, terminator: Boolean) {
@@ -812,6 +838,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         }
 
         private fun stopMedia() {
+            micRelease?.cancel()
             capture?.stop()
             capture = null
             playback?.stop()
@@ -1082,6 +1109,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         const val LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
         const val CONNECT_TIMEOUT_MS = 10_000
         const val PING_INTERVAL_MS = 5_000L
+        const val MIC_RELEASE_DELAY_MS = 150L
         const val TALK_TIMEOUT_MS = 300L
 
         // We speak the protocol of mumble-core's version: 1.7.0.
