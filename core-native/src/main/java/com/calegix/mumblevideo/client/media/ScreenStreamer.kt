@@ -18,6 +18,8 @@ import android.view.Display
 import android.view.Surface
 import android.view.WindowManager
 import com.calegix.mumblevideo.core.VideoCodec
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
 /**
@@ -155,7 +157,19 @@ class ScreenStreamer(
                 override fun onInputBufferAvailable(codec: MediaCodec, index: Int) = Unit // surface input
 
                 override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
-                    if (codec === encoder) handleOutput(codec, index, info) else codec.releaseOutputBuffer(index, false)
+                    try {
+                        if (codec ===
+                            encoder
+                        ) {
+                            handleOutput(codec, index, info)
+                        } else {
+                            codec.releaseOutputBuffer(index, false)
+                        }
+                    } catch (e: IllegalStateException) {
+                        // A codec being stopped (turned away, or the share ending) still delivers what
+                        // was queued; touching it then throws. Nothing in it is wanted any more.
+                        if (!closed && codec === encoder) onError("Encoder failed: ${e.message}")
+                    }
                 }
 
                 override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
@@ -220,9 +234,24 @@ class ScreenStreamer(
         }
     }
 
+    /**
+     * Torn down on the streamer's own thread, where the encoder's callbacks run: stopping it from
+     * another thread raced a callback halfway through releasing a buffer and crashed the app.
+     */
     override fun close() {
         if (closed) return
         closed = true
+        val done = CountDownLatch(1)
+        val posted = handler.post {
+            teardown()
+            done.countDown()
+        }
+        if (!posted) teardown() else done.await(CLOSE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        thread.quitSafely()
+    }
+
+    private fun teardown() {
+        handler.removeCallbacksAndMessages(null)
         displays.unregisterDisplayListener(displayListener)
         display?.release()
         display = null
@@ -233,12 +262,12 @@ class ScreenStreamer(
         encoder = null
         projection.unregisterCallback(projectionCallback)
         projection.stop()
-        thread.quitSafely()
     }
 
     companion object {
         private const val TAG = "MvScreen"
         private const val KEYFRAME_INTERVAL_SECONDS = 3
+        private const val CLOSE_TIMEOUT_MS = 2000L
         private val RESHAPE_KEYFRAMES_MS = longArrayOf(150, 350, 700)
 
         /** The screen's shape, scaled so the longer side is at most [longest], both sides multiples of 16. */
