@@ -230,6 +230,12 @@ fun AudioSettings(
             { v -> viewModel.update { it.copy(bluetoothHeadset = v) } },
             summary = "Route voice through a connected Bluetooth headset",
         )
+        SwitchPreference(
+            "Car stereo as media",
+            s.carAsMedia,
+            { v -> viewModel.update { it.copy(carAsMedia = v) } },
+            summary = "In the car, play like music and use the phone's microphone instead of a hands-free call",
+        )
     }
     if (capturingKey) {
         PttKeyDialog(

@@ -855,10 +855,11 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
 
         private fun startAudio() {
             val config = audioConfig
+            routing.onStream = { playback?.stream = it }
             routing.begin(config)
             playback = AudioPlayback().also {
                 it.deafened = _voiceState.value.selfDeafened
-                it.start(config.outputStream)
+                it.start(routing.stream)
             }
             micGranted =
                 context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED

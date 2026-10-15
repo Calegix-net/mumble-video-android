@@ -54,6 +54,7 @@ data class AppSettings(
     val echoCancellation: EchoCancellation = EchoCancellation.Off,
     val outputStream: AudioOutputStream = AudioOutputStream.VoiceCall,
     val bluetoothHeadset: Boolean = true,
+    val carAsMedia: Boolean = true,
 
     // Appearance
     val themeMode: ThemeMode = ThemeMode.System,
@@ -104,6 +105,7 @@ data class AppSettings(
         echoCancellation = echoCancellation,
         outputStream = outputStream,
         bluetoothHeadset = bluetoothHeadset,
+        carAsMedia = carAsMedia,
         halfDuplex = halfDuplex,
         pushToTalkToggles = pttToggle,
     )

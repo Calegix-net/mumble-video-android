@@ -44,6 +44,11 @@ data class AudioConfig(
     val outputStream: AudioOutputStream = AudioOutputStream.VoiceCall,
     /** Route input and output over a Bluetooth headset (SCO) when one is connected. */
     val bluetoothHeadset: Boolean = true,
+    /**
+     * With a car's Bluetooth connected, play voice as media (A2DP) and record from the phone,
+     * instead of placing a hands-free call: the car does not show a call or drop to call quality.
+     */
+    val carAsMedia: Boolean = true,
     /** Silence playback while transmitting, for speakerphone use without echo cancellation. */
     val halfDuplex: Boolean = false,
     /** Push-to-talk toggles on press instead of being held. */

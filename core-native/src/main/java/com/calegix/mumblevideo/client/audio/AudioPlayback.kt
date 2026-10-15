@@ -48,8 +48,20 @@ internal class AudioPlayback {
     @Volatile var framesConcealed: Long = 0
         private set
 
+    /**
+     * Which stream the track plays on. Set mid-session when routing moves between a call and media
+     * (a car connecting); the playback thread rebuilds its track, keeping every speaker's state.
+     */
+    @Volatile var stream: AudioOutputStream = AudioOutputStream.VoiceCall
+
     fun start(stream: AudioOutputStream) {
         if (running) return
+        this.stream = stream
+        running = true
+        thread = Thread({ loop() }, "mv-playback").also { it.start() }
+    }
+
+    private fun buildTrack(stream: AudioOutputStream): AudioTrack {
         val usage = if (stream ==
             AudioOutputStream.VoiceCall
         ) {
@@ -57,7 +69,7 @@ internal class AudioPlayback {
         } else {
             AudioAttributes.USAGE_MEDIA
         }
-        val track = AudioTrack.Builder()
+        return AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(usage).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build(),
             )
@@ -81,8 +93,6 @@ internal class AudioPlayback {
             .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
-        running = true
-        thread = Thread({ loop(track) }, "mv-playback").also { it.start() }
     }
 
     fun stop() {
@@ -104,8 +114,10 @@ internal class AudioPlayback {
         speakers.remove(session)?.decoder?.close()
     }
 
-    private fun loop(track: AudioTrack) {
+    private fun loop() {
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+        var trackStream = stream
+        var track = buildTrack(trackStream)
         val mix = IntArray(FRAME)
         val out = ShortArray(FRAME)
         val scratch = ShortArray(Opus.SAMPLE_RATE / 10)
@@ -115,6 +127,14 @@ internal class AudioPlayback {
         track.play()
         try {
             while (running) {
+                if (stream != trackStream) {
+                    track.stop()
+                    track.release()
+                    trackStream = stream
+                    track = buildTrack(trackStream)
+                    track.play()
+                    Log.i(TAG, "playing as $trackStream")
+                }
                 mix.fill(0)
                 if (!deafened) {
                     for ((session, speaker) in speakers) {
