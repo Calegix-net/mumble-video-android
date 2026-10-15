@@ -87,6 +87,12 @@ fun GeneralSettings(
             { v -> viewModel.update { it.copy(keepScreenOn = v) } },
             summary = "Stop the screen sleeping while the app is open and connected",
         )
+        SwitchPreference(
+            "Keep screen on while sharing",
+            s.keepScreenOnWhileSharing,
+            { v -> viewModel.update { it.copy(keepScreenOnWhileSharing = v) } },
+            summary = "A screen share stops when the phone locks; a camera share keeps going either way",
+        )
         PreferenceCategory("Chat")
         SwitchPreference(
             "Read messages aloud",

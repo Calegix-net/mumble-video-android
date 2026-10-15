@@ -52,6 +52,12 @@ class ConnectionService : LifecycleService() {
             }
 
             ACTION_DISCONNECT -> lifecycleScope.launch { session.disconnect() }
+
+            ACTION_STOP_SHARING -> lifecycleScope.launch {
+                val local = session.core.localVideo.value
+                if (local.screen != null) session.core.stopScreenShare()
+                if (local.camera != null) session.core.stopCamera()
+            }
         }
         if (!started) {
             started = true
@@ -66,7 +72,10 @@ class ConnectionService : LifecycleService() {
         HeadsetButton(this, session, (application as MumbleVideoApp).container.settings, lifecycleScope)
     }
 
+    private val wake by lazy { ShareWakeLock(this) }
+
     override fun onDestroy() {
+        wake.release()
         headset.stop()
         super.onDestroy()
     }
@@ -93,11 +102,18 @@ class ConnectionService : LifecycleService() {
             }
         }
         lifecycleScope.launch {
-            combine(session.core.connectionState, session.core.voiceState, session.core.serverState) {
-                    state,
-                    voice,
-                    _,
-                ->
+            val settings = (application as MumbleVideoApp).container.settings.settings
+            combine(session.core.localVideo, settings) { local, s ->
+                (local.camera != null || local.screen != null) to (local.screen != null && s.keepScreenOnWhileSharing)
+            }.distinctUntilChanged().collect { (sharing, screenOn) -> wake.update(sharing, screenOn) }
+        }
+        lifecycleScope.launch {
+            combine(
+                session.core.connectionState,
+                session.core.voiceState,
+                session.core.serverState,
+                session.core.localVideo,
+            ) { state, voice, _, _ ->
                 state to voice
             }.collect { (state, voice) ->
                 val over = state is ConnectionState.Disconnected || state is ConnectionState.Rejected
@@ -142,6 +158,9 @@ class ConnectionService : LifecycleService() {
     }
 
     private fun build(state: ConnectionState, voice: VoiceState): Notification {
+        val local = session.core.localVideo.value
+        val sharing = listOfNotNull(local.screen?.let { "screen" }, local.camera?.let { "camera" })
+            .joinToString(" and ")
         val server = session.currentServer.value?.displayName ?: getString(R.string.app_name)
         val channel = session.core.serverState.value.let { s -> s.selfUser?.channel?.let { s.channels[it]?.name } }
         val text = when (state) {
@@ -152,6 +171,7 @@ class ConnectionService : LifecycleService() {
                 } else if (voice.selfMuted) {
                     append(" · muted")
                 }
+                if (sharing.isNotEmpty()) append(" · sharing ").append(sharing)
             }
 
             is ConnectionState.Connecting -> "Connecting…"
@@ -178,10 +198,16 @@ class ConnectionService : LifecycleService() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_CALL)
+            // Shown in full on the lock screen, so a share that keeps going while locked is visible.
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
         if (state is ConnectionState.Connected) {
+            if (sharing.isNotEmpty()) {
+                builder.addAction(0, "Stop sharing", action(ACTION_STOP_SHARING))
+            } else {
+                builder.addAction(0, if (voice.selfDeafened) "Undeafen" else "Deafen", action(ACTION_DEAFEN))
+            }
             builder.addAction(0, if (voice.selfMuted) "Unmute" else "Mute", action(ACTION_MUTE))
-            builder.addAction(0, if (voice.selfDeafened) "Undeafen" else "Deafen", action(ACTION_DEAFEN))
         }
         builder.addAction(0, "Disconnect", action(ACTION_DISCONNECT))
         return builder.build()
@@ -198,6 +224,7 @@ class ConnectionService : LifecycleService() {
         private const val ACTION_MUTE = "com.calegix.mumblevideo.action.MUTE"
         private const val ACTION_DEAFEN = "com.calegix.mumblevideo.action.DEAFEN"
         private const val ACTION_DISCONNECT = "com.calegix.mumblevideo.action.DISCONNECT"
+        private const val ACTION_STOP_SHARING = "com.calegix.mumblevideo.action.STOP_SHARING"
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, ConnectionService::class.java))

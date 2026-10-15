@@ -29,6 +29,7 @@ enum class PttButtonSize(val heightDp: Int) { Small(56), Medium(88), Large(140) 
 data class AppSettings(
     // General
     val keepScreenOn: Boolean = false,
+    val keepScreenOnWhileSharing: Boolean = true,
     val textToSpeech: Boolean = false,
     val shortTextToSpeech: Boolean = false,
     val loadImages: Boolean = true,
