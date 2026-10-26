@@ -102,6 +102,17 @@ internal object SessionReducer {
         state.copy(users = state.users - UserSession(msg.session))
 
     /**
+     * Where to move ourselves after a reconnect: back to [wanted], the channel we were in, if it
+     * still exists, we may enter it and the server did not already put us there.
+     */
+    fun rejoinTarget(state: ServerState, wanted: ChannelId?): ChannelId? {
+        wanted ?: return null
+        val here = state.selfUser?.channel ?: return null
+        val channel = state.channels[wanted] ?: return null
+        return wanted.takeIf { it != here && channel.canEnter }
+    }
+
+    /**
      * Applies a VideoState. Screen-share audio arrives as its own stream with codec OpusAudio and is
      * folded into the same sender's screen stream as [VideoStream.audio].
      */

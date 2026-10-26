@@ -7,7 +7,9 @@ import com.calegix.mumblevideo.core.StreamKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Reference-counts video subscriptions across screens, so that going from a grid tile to the
@@ -75,6 +77,25 @@ class SubscriptionManager(
 
     fun isHeld(stream: StreamKey): Boolean = entries[stream]?.let { it.holders > 0 } == true
 
+    /**
+     * After a reconnect the core starts with no subscriptions and no surfaces, while the screens
+     * still hold theirs. Asks again for every held stream once the server announces it anew, and
+     * hands its surface back, so video comes back by itself.
+     */
+    fun resume() {
+        entries.forEach { (stream, entry) ->
+            if (entry.holders <= 0) return@forEach
+            scope.launch {
+                val announced = withTimeoutOrNull(RESUME_TIMEOUT_MS) {
+                    core.videoStreams.first { streams -> streams.any { it.key == stream } }
+                }
+                if (announced == null || entries[stream] !== entry) return@launch
+                subscribe(stream, entry.bandwidth)
+                surfaces[stream]?.let { core.setVideoSurface(stream, it) }
+            }
+        }
+    }
+
     /** Forgets everything, e.g. on disconnect. The core drops its subscriptions itself. */
     fun clear() {
         entries.values.forEach { it.release?.cancel() }
@@ -88,5 +109,9 @@ class SubscriptionManager(
         } catch (_: MumbleCoreException) {
             // The stream ended or we disconnected in the meantime; the state flows say so.
         }
+    }
+
+    private companion object {
+        const val RESUME_TIMEOUT_MS = 15_000L
     }
 }

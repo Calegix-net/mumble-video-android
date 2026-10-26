@@ -92,24 +92,34 @@ internal class UdpChannel(
             }
             val length = packet.length
             if (length < 1) continue
-            when {
-                buffer[0] == MEDIA_CHANNEL_VIDEO -> onVideoDatagram(buffer.copyOf(length))
+            try {
+                dispatch(buffer, length)
+            } catch (e: Exception) {
+                // A datagram we could not handle is dropped; an exception here would end the app.
+                badPackets++
+                Log.w(TAG, "udp datagram failed", e)
+            }
+        }
+    }
 
-                else -> {
-                    // With the channel byte the audio payload starts at 1. A stock server's bare
-                    // payload starts at 0; try that too before calling it bad.
-                    val framed = if (buffer[0] == MEDIA_CHANNEL_AUDIO) crypt.decrypt(buffer, 1, length - 1) else null
-                    val plain = framed ?: crypt.decrypt(buffer, 0, length)
-                    if (plain == null) {
-                        badPackets++
-                    } else {
-                        channelByte = framed != null
-                        if (!framingLearned) {
-                            framingLearned = true
-                            onFramingLearned(channelByte)
-                        }
-                        onPlaintext(plain)
+    private fun dispatch(buffer: ByteArray, length: Int) {
+        when {
+            buffer[0] == MEDIA_CHANNEL_VIDEO -> onVideoDatagram(buffer.copyOf(length))
+
+            else -> {
+                // With the channel byte the audio payload starts at 1. A stock server's bare
+                // payload starts at 0; try that too before calling it bad.
+                val framed = if (buffer[0] == MEDIA_CHANNEL_AUDIO) crypt.decrypt(buffer, 1, length - 1) else null
+                val plain = framed ?: crypt.decrypt(buffer, 0, length)
+                if (plain == null) {
+                    badPackets++
+                } else {
+                    channelByte = framed != null
+                    if (!framingLearned) {
+                        framingLearned = true
+                        onFramingLearned(channelByte)
                     }
+                    onPlaintext(plain)
                 }
             }
         }

@@ -185,11 +185,24 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 override fun onAvailable(network: Network) {
                     val previous = current
                     current = network
-                    if (previous != null && previous != network) link?.drop("default network changed")
+                    if (previous != null && previous != network) {
+                        link?.drop("default network changed", reconnectAtOnce = true)
+                    }
+                    // A reconnect waiting out its backoff tries the new network now.
+                    networkChanges.trySend(Unit)
                 }
             },
         )
     }
+
+    /** Signalled whenever a default network appears; cuts a reconnect's wait short. */
+    private val networkChanges = Channel<Unit>(Channel.CONFLATED)
+
+    /**
+     * The channel we were in, so that a reconnect puts us back there instead of in the server's
+     * default channel. Cleared by a new [connect].
+     */
+    @Volatile private var rejoinChannel: ChannelId? = null
 
     // ---------------------------------------------------------------------------------------------
     // Connection lifecycle
@@ -197,6 +210,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
 
     override suspend fun connect(request: ConnectRequest) {
         connectionJob?.cancelAndJoin()
+        rejoinChannel = null
         connectionJob = scope.launch(Dispatchers.IO) { runWithReconnect(request) }
     }
 
@@ -219,14 +233,23 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         var request = initial
         var attempt = 0
         while (scope.isActive) {
-            val outcome = try {
+            val result = try {
                 runOnce(request) { trusted ->
                     request =
                         request.copy(trustedCertificateSha256 = request.trustedCertificateSha256 + trusted)
                 }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: Exception) {
+                // A bug of ours must cost a reconnect, not the whole app (and with it the call).
+                Log.e(TAG, "connection failed unexpectedly", e)
+                Outcome.Dropped(
+                    DisconnectReason.ConnectionLost("Internal error: ${e.javaClass.simpleName}"),
+                    "Connection error",
+                    wasConnected = false,
+                )
             }
+            val outcome = Reconnects.retriable(result, reconnecting = attempt > 0)
             when (outcome) {
                 is Outcome.Final -> {
                     _connectionState.value = outcome.state
@@ -239,13 +262,20 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                         return
                     }
                     attempt++
-                    val wait = (2_000L shl (attempt - 1).coerceAtMost(4)).coerceAtMost(30_000L)
-                    var remaining = wait
-                    while (remaining > 0) {
+                    if (outcome.reconnectAtOnce) {
+                        // The phone changed networks: the server is likely fine, try the new path now.
+                        networkChanges.tryReceive()
                         _connectionState.value =
-                            ConnectionState.Reconnecting(request.server, attempt, remaining, outcome.message)
-                        delay(1_000)
-                        remaining -= 1_000
+                            ConnectionState.Reconnecting(request.server, attempt, 0, outcome.message)
+                    } else {
+                        var remaining = Reconnects.backoffMillis(attempt)
+                        networkChanges.tryReceive() // only a change from now on counts
+                        while (remaining > 0) {
+                            _connectionState.value =
+                                ConnectionState.Reconnecting(request.server, attempt, remaining, outcome.message)
+                            if (withTimeoutOrNull(1_000) { networkChanges.receive() } != null) break
+                            remaining -= 1_000
+                        }
                     }
                     if (outcome.wasConnected) attempt = attempt.coerceAtMost(1)
                 }
@@ -253,10 +283,16 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         }
     }
 
-    private sealed interface Outcome {
+    internal sealed interface Outcome {
         class Final(val state: ConnectionState) : Outcome
 
-        class Dropped(val reason: DisconnectReason, val message: String, val wasConnected: Boolean) : Outcome
+        class Dropped(
+            val reason: DisconnectReason,
+            val message: String,
+            val wasConnected: Boolean,
+            /** Retry without the backoff wait, e.g. after the phone moved to another network. */
+            val reconnectAtOnce: Boolean = false,
+        ) : Outcome
     }
 
     /** One connection, from DNS to teardown. */
@@ -457,14 +493,22 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 )
                 var connected = false
                 for (message in inbox) {
-                    val outcome = handle(message, connected)
+                    val outcome = try {
+                        handle(message, connected)
+                    } catch (e: Exception) {
+                        // One message we could not apply (malformed, or a bug in handling it) is
+                        // skipped; it must not take the app down with it.
+                        Log.e(TAG, "could not apply control message ${message.type}", e)
+                        null
+                    }
                     if (message.type == ControlType.SERVER_SYNC) connected = true
                     if (outcome != null) return outcome
                 }
                 return Outcome.Dropped(
-                    DisconnectReason.ConnectionLost("The server closed the connection"),
+                    DisconnectReason.ConnectionLost(dropReason ?: "The server closed the connection"),
                     "Connection lost",
                     connected,
+                    reconnectAtOnce = reconnectAtOnce,
                 )
             } finally {
                 pinger.cancel()
@@ -478,9 +522,15 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
 
         @Volatile private var lastHeardFromServer = SystemClock.elapsedRealtime()
 
+        @Volatile private var dropReason: String? = null
+
+        @Volatile private var reconnectAtOnce = false
+
         /** Closing the socket ends the read loop, which ends the session and starts a reconnect. */
-        fun drop(why: String) {
+        fun drop(why: String, reconnectAtOnce: Boolean = false) {
             Log.i(TAG, "dropping the connection: $why")
+            dropReason = why
+            this.reconnectAtOnce = reconnectAtOnce
             runCatching { socket.close() }
         }
 
@@ -639,6 +689,18 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                     ).setSelfMute(voice.selfMuted).setSelfDeaf(voice.selfDeafened).build(),
                 )
             }
+            // After a reconnect, back to the channel we were in rather than the server's default.
+            val state = _serverState.value
+            val back = SessionReducer.rejoinTarget(state, rejoinChannel)
+            if (back != null) {
+                Log.i(TAG, "reconnected: back to $back")
+                send(
+                    ControlType.USER_STATE,
+                    MumbleProto.UserState.newBuilder().setSession(sync.session).setChannelId(back.value).build(),
+                )
+            } else {
+                rejoinChannel = state.selfUser?.channel
+            }
             startAudio()
             publishConnected()
         }
@@ -702,6 +764,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
                 // The server is the authority on our own state (it may mute us, or unmute on undeafen).
                 _voiceState.update { it.copy(selfMuted = after.selfMuted, selfDeafened = after.selfDeafened) }
                 applyVoiceToAudio()
+                if (connected) rejoinChannel = after.channel
             }
         }
 
@@ -936,14 +999,15 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
             streamAudio.values.forEach(StreamAudioPlayer::close)
             streamAudio.clear()
             orphanAudio.clear()
+            // UDP first: its receive thread feeds the media session, which must not be used once closed.
+            udp?.close()
+            udp = null
             synchronized(media) { media.close() }
             micRelease?.cancel()
             capture?.stop()
             capture = null
             playback?.stop()
             playback = null
-            udp?.close()
-            udp = null
             routing.end()
         }
 

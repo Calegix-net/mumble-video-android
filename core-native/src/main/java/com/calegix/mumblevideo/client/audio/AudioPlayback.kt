@@ -7,6 +7,7 @@ import android.os.Process
 import android.util.Log
 import com.calegix.mumblevideo.core.AudioOutputStream
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.math.log10
 
 /**
@@ -29,6 +30,12 @@ internal class AudioPlayback {
     }
 
     private val speakers = ConcurrentHashMap<Int, Speaker>()
+
+    /**
+     * Speakers removed by another thread, whose decoders the playback thread frees: it may be
+     * decoding with one at that very moment, and libopus handles are single-threaded.
+     */
+    private val retired = ConcurrentLinkedQueue<Speaker>()
 
     @Volatile var deafened: Boolean = false
 
@@ -101,6 +108,7 @@ internal class AudioPlayback {
         thread = null
         speakers.values.forEach { it.decoder.close() }
         speakers.clear()
+        freeRetired()
     }
 
     /** One received Opus packet from [session]. */
@@ -111,7 +119,15 @@ internal class AudioPlayback {
     }
 
     fun removeSpeaker(session: Int) {
-        speakers.remove(session)?.decoder?.close()
+        speakers.remove(session)?.let(retired::add)
+        if (!running) freeRetired()
+    }
+
+    private fun freeRetired() {
+        while (true) {
+            val speaker = retired.poll() ?: return
+            speaker.decoder.close()
+        }
     }
 
     private fun loop() {
@@ -127,6 +143,7 @@ internal class AudioPlayback {
         track.play()
         try {
             while (running) {
+                freeRetired()
                 if (stream != trackStream) {
                     track.stop()
                     track.release()

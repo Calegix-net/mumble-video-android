@@ -7,6 +7,7 @@ import com.calegix.mumblevideo.core.ConnectionState
 import com.calegix.mumblevideo.core.MumbleCore
 import com.calegix.mumblevideo.core.MumbleCoreException
 import com.calegix.mumblevideo.core.ScreenShareRequest
+import com.calegix.mumblevideo.core.UserSession
 import com.calegix.mumblevideo.data.certificates.CertificateRepository
 import com.calegix.mumblevideo.data.servers.SavedServer
 import com.calegix.mumblevideo.data.servers.ServerRepository
@@ -98,6 +99,16 @@ class SessionController(
         }
         scope.launch {
             settings.settings.map { it.toAudioConfig() }.distinctUntilChanged().collect { core.setAudioConfig(it) }
+        }
+        // A reconnect is a new session on the server: pick the videos being watched up again.
+        scope.launch {
+            var session: UserSession? = null
+            core.connectionState.collect { state ->
+                if (state !is ConnectionState.Connected) return@collect
+                val now = core.serverState.value.self
+                if (session != null && now != session) subscriptions.resume()
+                session = now
+            }
         }
     }
 
