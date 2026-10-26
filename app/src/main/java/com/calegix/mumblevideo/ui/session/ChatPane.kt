@@ -6,6 +6,8 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,7 +34,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material3.AssistChip
@@ -44,6 +49,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,6 +62,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -84,11 +91,13 @@ fun ChatPane(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+    // The welcome message, when there is one, is the first item, before the messages.
+    val header = if (state.welcome.isNotBlank()) 1 else 0
     LaunchedEffect(state.entries.size) {
-        if (state.entries.isNotEmpty()) listState.animateScrollToItem(state.entries.lastIndex)
+        if (state.entries.isNotEmpty()) listState.animateScrollToItem(state.entries.lastIndex + header)
     }
     Column(modifier.fillMaxSize().imePadding()) {
-        if (state.entries.isEmpty()) {
+        if (state.entries.isEmpty() && header == 0) {
             Column(
                 Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.Center,
@@ -112,6 +121,7 @@ fun ChatPane(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             ) {
+                if (header == 1) item(key = "welcome") { WelcomeCard(state.welcome, state.loadImages) }
                 items(state.entries, key = { it.message.id }) { MessageBubble(it, state.loadImages) }
             }
         }
@@ -127,7 +137,8 @@ private fun MessageBubble(entry: ChatEntry, loadImages: Boolean) {
     val time = remember(message.timestampEpochMillis) {
         DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(message.timestampEpochMillis))
     }
-    val parts = remember(message.html) { ChatImages.split(message.html) }
+    val fromServer = message.sender == null && !own
+    val parts = remember(message.html, fromServer) { if (fromServer) emptyList() else ChatImages.split(message.html) }
     val scheme = MaterialTheme.colorScheme
     val (container, content) = when {
         own -> scheme.primaryContainer to scheme.onPrimaryContainer
@@ -149,26 +160,14 @@ private fun MessageBubble(entry: ChatEntry, loadImages: Boolean) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            parts.forEach { part ->
-                when (part) {
-                    is ChatImages.Part.Html -> {
-                        val text = remember(part) { AnnotatedString.fromHtml(part.html) }
-                        // Long-press selects, with Copy and Select all, as text does elsewhere on Android.
-                        SelectionContainer {
-                            Text(text, style = MaterialTheme.typography.bodyLarge, color = content)
-                        }
-                    }
-
-                    is ChatImages.Part.Image -> if (loadImages) {
-                        ChatImage(part.bytes, "Picture from ${if (own) "you" else message.senderName}")
-                    } else {
-                        Text(
-                            "Picture hidden (Settings › General › Load images)",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = secondary,
-                        )
-                    }
+            if (fromServer) {
+                // From the server itself (a bot's greeting, an announcement): often a styled card with
+                // tables and pictures, laid out the way the welcome message is.
+                SelectionContainer {
+                    RichHtmlText(message.html, background = container, contentColor = content, loadImages = loadImages)
                 }
+            } else {
+                parts.forEach { part -> MessagePart(part, own, message.senderName, content, secondary, loadImages) }
             }
             Text(
                 time,
@@ -176,6 +175,92 @@ private fun MessageBubble(entry: ChatEntry, loadImages: Boolean) {
                 color = secondary,
                 modifier = Modifier.align(Alignment.End),
             )
+        }
+    }
+}
+
+@Composable
+private fun MessagePart(
+    part: ChatImages.Part,
+    own: Boolean,
+    senderName: String,
+    content: Color,
+    secondary: Color,
+    loadImages: Boolean,
+) {
+    when (part) {
+        is ChatImages.Part.Html -> {
+            val text = remember(part) { AnnotatedString.fromHtml(part.html) }
+            // Long-press selects, with Copy and Select all, as text does elsewhere on Android.
+            SelectionContainer {
+                Text(text, style = MaterialTheme.typography.bodyLarge, color = content)
+            }
+        }
+
+        is ChatImages.Part.Image -> if (loadImages) {
+            ChatImage(part.bytes, "Picture from ${if (own) "you" else senderName}")
+        } else {
+            Text(
+                "Picture hidden (Settings › General › Load images)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = secondary,
+            )
+        }
+    }
+}
+
+/**
+ * The server's welcome message, first in the chat as the desktop client logs it on connecting, in a
+ * card of its own rather than a bubble. Tapping the title folds it away.
+ */
+@Composable
+private fun WelcomeCard(html: String, loadImages: Boolean) {
+    var expanded by rememberSaveable { mutableStateOf(true) }
+    val scheme = MaterialTheme.colorScheme
+    val container = scheme.surfaceContainerLow
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = container,
+        border = BorderStroke(1.dp, scheme.outlineVariant),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClickLabel = if (expanded) "Collapse" else "Expand") { expanded = !expanded }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Outlined.Campaign,
+                    contentDescription = null,
+                    tint = scheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text(
+                    "Welcome message",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = scheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 8.dp).weight(1f),
+                )
+                Icon(
+                    if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    contentDescription = null,
+                    tint = scheme.onSurfaceVariant,
+                )
+            }
+            AnimatedVisibility(expanded) {
+                SelectionContainer {
+                    RichHtmlText(
+                        html,
+                        background = container,
+                        contentColor = scheme.onSurface,
+                        loadImages = loadImages,
+                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    )
+                }
+            }
         }
     }
 }

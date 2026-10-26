@@ -36,6 +36,20 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `the welcome message is offered while connected`() = runTest {
+        val graph = TestGraph(this)
+        val vm = ChatViewModel(graph.session, graph.settings)
+        keepCollecting(vm.uiState)
+        assertEquals("", vm.uiState.value.welcome)
+        with(graph) { connect() }
+
+        assertTrue(vm.uiState.value.welcome, vm.uiState.value.welcome.contains("simulated server"))
+        graph.core.disconnect()
+        settle()
+        assertEquals("", vm.uiState.value.welcome)
+    }
+
+    @Test
     fun `private message target is labelled and offered`() = runTest {
         val graph = TestGraph(this)
         val vm = ChatViewModel(graph.session, graph.settings)

@@ -65,6 +65,8 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        // Robolectric, for the screenshot tests.
+        unitTests.isIncludeAndroidResources = true
     }
 
     packaging {
@@ -124,4 +126,23 @@ dependencies {
     // Throwaway PKCS#12 files for the backup tests.
     testImplementation(libs.bouncycastle.pkix)
     testImplementation(libs.bouncycastle.prov)
+    // Screenshot tests, rendered on the JVM (Robolectric native graphics), no device needed.
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    testImplementation(libs.androidx.test.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    debugImplementation(libs.compose.ui.test.manifest)
+}
+
+// The screenshot tests write docs/screenshots/*.png and are slow to start (Robolectric downloads an
+// Android runtime), so they only run when asked for:
+//   ./gradlew :app:testDebugUnitTest -Pscreenshots --tests '*ScreenshotTest*'
+tasks.withType<Test>().configureEach {
+    if (project.hasProperty("screenshots")) {
+        systemProperty("roborazzi.test.record", "true")
+    } else {
+        exclude("**/*ScreenshotTest*")
+    }
 }

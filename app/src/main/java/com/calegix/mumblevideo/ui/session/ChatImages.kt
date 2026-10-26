@@ -62,9 +62,16 @@ object ChatImages {
         else -> Part.Html(html.take(MAX_TEXT_CHARS) + " … [message cut]")
     }
 
-    private fun imagePart(tag: String): Part {
-        val src = SRC.find(tag)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }?.let(::unescape)
-            ?: return Part.Html("[picture]")
+    private fun imagePart(tag: String): Part =
+        fromSource(SRC.find(tag)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }?.let(::unescape))
+
+    /**
+     * What an `<img>` whose src attribute (entities already decoded) is [src] shows, under the same
+     * limits as [split]: the picture's bytes, or markup to show in its place. Also used for pictures
+     * in a server's welcome message.
+     */
+    fun fromSource(src: String?): Part {
+        if (src.isNullOrEmpty()) return Part.Html("[picture]")
         DATA_URI.find(src)?.let { data ->
             // Refused before decoding: the base64 alone could be megabytes. The raw form may be
             // wrapped or percent-encoded, so it is allowed some slack before it is cleaned up.
