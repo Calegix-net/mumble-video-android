@@ -522,7 +522,12 @@ private fun ServerInfoDialog(state: SessionUiState, onDismiss: () -> Unit) {
                             style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.padding(top = 8.dp),
                         )
-                        Text(AnnotatedString.fromHtml(info.welcomeText))
+                        // AlertDialog's own container and text colours, which the server's colours must read on.
+                        RichHtmlText(
+                            info.welcomeText,
+                            background = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }

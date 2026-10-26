@@ -3,6 +3,7 @@ package com.calegix.mumblevideo.ui.session
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.calegix.mumblevideo.core.ChatMessage
+import com.calegix.mumblevideo.core.ConnectionState
 import com.calegix.mumblevideo.core.MessageTarget
 import com.calegix.mumblevideo.core.MumbleCoreException
 import com.calegix.mumblevideo.core.ServerState
@@ -33,6 +34,11 @@ data class ChatUiState(
     /** Longest image message the server accepts, in characters. */
     val imageLimit: Int = 0,
     val sendingImage: Boolean = false,
+    /**
+     * The server's welcome message (HTML), shown first in the chat as the desktop client logs it on
+     * connecting. Empty when the server has none or we are not connected.
+     */
+    val welcome: String = "",
 )
 
 class ChatViewModel(
@@ -44,6 +50,9 @@ class ChatViewModel(
     private val error = MutableStateFlow<String?>(null)
     private val sendingImage = MutableStateFlow(false)
 
+    /** Kept through a reconnect, so the welcome message does not blink out and back. */
+    private var welcome = ""
+
     private val _draft = MutableStateFlow("")
     val draft: StateFlow<String> = _draft.asStateFlow()
 
@@ -53,7 +62,8 @@ class ChatViewModel(
             settings.settings,
             core.capabilities,
             sendingImage,
-        ) { (chat, state, selected, error), prefs, caps, sending ->
+            core.connectionState,
+        ) { (chat, state, selected, error), prefs, caps, sending, connection ->
             val channelLabel = state.selfUser?.channel?.let { state.channels[it]?.name }.orEmpty()
             val targets = buildList {
                 state.selfUser?.channel?.let {
@@ -72,6 +82,7 @@ class ChatViewModel(
                 loadImages = prefs.loadImages,
                 imageLimit = caps.maxImageMessageLength,
                 sendingImage = sending,
+                welcome = welcomeFor(connection),
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatUiState())
 
@@ -121,6 +132,15 @@ class ChatViewModel(
                 sendingImage.value = false
             }
         }
+    }
+
+    private fun welcomeFor(connection: ConnectionState): String {
+        welcome = when (connection) {
+            is ConnectionState.Connected -> connection.info.welcomeText.trim()
+            is ConnectionState.Reconnecting -> welcome
+            else -> ""
+        }
+        return welcome
     }
 
     private fun currentTarget(): MessageTarget? =
