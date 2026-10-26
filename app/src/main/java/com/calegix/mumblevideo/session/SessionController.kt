@@ -173,11 +173,30 @@ class SessionController(
     }
 
     private fun appendMessage(message: ChatMessage) {
-        _chat.update { (it + message).takeLast(MAX_HISTORY) }
+        _chat.update { trimHistory(it + message) }
         if (!message.isOwn) _unreadMessages.update { it + 1 }
     }
 
-    private companion object {
+    internal companion object {
         const val MAX_HISTORY = 500
+
+        /**
+         * History is also capped by size: a message can be up to 8 MB, so 500 of them could hold
+         * gigabytes. 16 M characters (32 MB) keeps hundreds of ordinary pictures.
+         */
+        const val MAX_HISTORY_CHARS = 16_000_000L
+
+        /** The newest messages within both caps; the newest one is always kept. */
+        fun trimHistory(history: List<ChatMessage>): List<ChatMessage> {
+            val recent = history.takeLast(MAX_HISTORY)
+            var chars = 0L
+            var keep = 0
+            for (message in recent.asReversed()) {
+                chars += message.html.length
+                if (keep > 0 && chars > MAX_HISTORY_CHARS) break
+                keep++
+            }
+            return if (keep == recent.size) recent else recent.takeLast(keep)
+        }
     }
 }

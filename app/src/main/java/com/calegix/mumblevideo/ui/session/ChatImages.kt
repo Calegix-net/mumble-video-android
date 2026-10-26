@@ -1,6 +1,7 @@
 package com.calegix.mumblevideo.ui.session
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Base64
 import java.io.ByteArrayOutputStream
 import kotlin.math.max
@@ -28,6 +29,12 @@ object ChatImages {
             setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
         )
 
+    /**
+     * Longest run of markup rendered as text. Laying out megabytes of text (the control channel
+     * carries messages up to 8 MB) freezes the chat and can exhaust memory, so the rest is cut.
+     */
+    const val MAX_TEXT_CHARS = 65_536
+
     /** A piece of a received message: markup to render as text, or an embedded image. */
     sealed interface Part {
         data class Html(val html: String) : Part
@@ -36,26 +43,36 @@ object ChatImages {
     }
 
     fun split(html: String): List<Part> {
-        if (!html.contains("<img", ignoreCase = true)) return listOf(Part.Html(html))
+        if (!html.contains("<img", ignoreCase = true)) return listOf(text(html))
         val parts = ArrayList<Part>()
         var last = 0
         for (match in IMG.findAll(html)) {
             val before = html.substring(last, match.range.first)
-            if (before.isNotBlank()) parts += Part.Html(before)
+            if (before.isNotBlank()) parts += text(before)
             parts += imagePart(match.value)
             last = match.range.last + 1
         }
         val rest = html.substring(last)
-        if (rest.isNotBlank()) parts += Part.Html(rest)
+        if (rest.isNotBlank()) parts += text(rest)
         return parts
+    }
+
+    private fun text(html: String): Part.Html = when {
+        html.length <= MAX_TEXT_CHARS -> Part.Html(html)
+        else -> Part.Html(html.take(MAX_TEXT_CHARS) + " … [message cut]")
     }
 
     private fun imagePart(tag: String): Part {
         val src = SRC.find(tag)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }?.let(::unescape)
             ?: return Part.Html("[picture]")
         DATA_URI.find(src)?.let { data ->
+            // Refused before decoding: the base64 alone could be megabytes. The raw form may be
+            // wrapped or percent-encoded, so it is allowed some slack before it is cleaned up.
+            val raw = data.groupValues[1]
+            if (raw.length > ImageBounds.MAX_ENCODED_CHARS * 4) return Part.Html(TOO_LARGE)
             // Payloads arrive line-wrapped, with entity-encoded newlines, or percent-encoded.
-            val payload = percentDecode(data.groupValues[1]).filterNot { it.isWhitespace() }
+            val payload = percentDecode(raw).filterNot { it.isWhitespace() }
+            if (payload.length > ImageBounds.MAX_ENCODED_CHARS) return Part.Html(TOO_LARGE)
             val bytes = runCatching { java.util.Base64.getMimeDecoder().decode(payload) }.getOrNull()
             return if (bytes != null && bytes.isNotEmpty()) Part.Image(bytes) else Part.Html("[unreadable picture]")
         }
@@ -67,6 +84,22 @@ object ChatImages {
         }
         return Part.Html("[picture]")
     }
+
+    private const val TOO_LARGE = "[picture too large to show]"
+
+    /**
+     * Decodes a received picture within [ImageBounds]: the declared size is read first, without
+     * allocating pixels, and a picture over the limits gives null; anything else is decoded
+     * subsampled so it stays within [ImageBounds.MAX_DECODED_SIDE]. Never throws.
+     */
+    fun decode(bytes: ByteArray): Bitmap? = runCatching {
+        ImageBounds.declaredSize(bytes)?.let { if (ImageBounds.sampleSize(it.width, it.height) == null) return null }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val sample = ImageBounds.sampleSize(bounds.outWidth, bounds.outHeight) ?: return null
+        val options = BitmapFactory.Options().apply { inSampleSize = sample }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+    }.getOrNull()
 
     /** %2B and friends only; unlike URLDecoder, a literal + stays a + (base64 needs it). */
     private fun percentDecode(value: String): String {
@@ -106,7 +139,9 @@ object ChatImages {
      * CPU-heavy: call off the main thread.
      */
     fun toMessage(bitmap: Bitmap, limit: Int): String? {
-        val budget = if (limit > 0) limit else DEFAULT_LIMIT
+        // Never more than receivers decode (ImageBounds.MAX_ENCODED_CHARS), even when the server
+        // allows longer image messages.
+        val budget = minOf(if (limit > 0) limit else DEFAULT_LIMIT, ImageBounds.MAX_ENCODED_CHARS)
         var longest = minOf(1600, max(bitmap.width, bitmap.height))
         while (longest >= 160) {
             val scaled = scale(bitmap, longest)
