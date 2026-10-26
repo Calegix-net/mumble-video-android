@@ -1,8 +1,10 @@
 package com.calegix.mumblevideo.client.state
 
+import com.calegix.mumblevideo.core.Channel
 import com.calegix.mumblevideo.core.ChannelId
 import com.calegix.mumblevideo.core.ServerState
 import com.calegix.mumblevideo.core.StreamKey
+import com.calegix.mumblevideo.core.User
 import com.calegix.mumblevideo.core.UserSession
 import com.calegix.mumblevideo.core.VideoCodec
 import com.calegix.mumblevideo.proto.MumbleProto
@@ -146,5 +148,25 @@ class SessionReducerTest {
         )
         assertEquals(StreamKey(UserSession(9), 0), streams.single().key)
         assertTrue(streams.single().isLocal)
+    }
+
+    @Test
+    fun `a reconnect goes back to the channel we were in, if it still lets us in`() {
+        val state = ServerState(
+            channels = listOf(
+                Channel(ChannelId.ROOT, null, "Root"),
+                Channel(ChannelId(1), ChannelId.ROOT, "Lobby"),
+                Channel(ChannelId(2), ChannelId.ROOT, "Games"),
+                Channel(ChannelId(3), ChannelId.ROOT, "Locked", canEnter = false),
+            ).associateBy { it.id },
+            users = mapOf(UserSession(9) to User(UserSession(9), "me", ChannelId(1))),
+            self = UserSession(9),
+        )
+        assertEquals(ChannelId(2), SessionReducer.rejoinTarget(state, ChannelId(2)))
+        assertNull("already there", SessionReducer.rejoinTarget(state, ChannelId(1)))
+        assertNull("may not enter", SessionReducer.rejoinTarget(state, ChannelId(3)))
+        assertNull("channel is gone", SessionReducer.rejoinTarget(state, ChannelId(4)))
+        assertNull("first connect", SessionReducer.rejoinTarget(state, null))
+        assertNull("not synced", SessionReducer.rejoinTarget(state.copy(self = null), ChannelId(2)))
     }
 }

@@ -1,5 +1,6 @@
 package com.calegix.mumblevideo.ui.session
 
+import android.os.SystemClock
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ScreenShare
@@ -29,6 +31,7 @@ import androidx.compose.material.icons.outlined.HeadsetOff
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MicOff
 import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -36,14 +39,23 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -66,12 +78,42 @@ fun ChannelList(
     onUser: (User) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(modifier = modifier) {
+    // A single tap never moves you, as on the desktop and iOS: it picks the channel and shows a
+    // Join button on it. A long press joins at once. Taps while the list scrolls, or just after a
+    // fling (the tap that stops it, a brush of the screen), are ignored altogether.
+    var picked by rememberSaveable { mutableStateOf<Int?>(null) }
+    val selected = joinCandidate(rows, picked?.let(::ChannelId))
+    val listState = rememberLazyListState()
+    val guard = remember { ScrollTapGuard() }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }.collect { guard.scrolling(it) }
+    }
+    val haptics = LocalHapticFeedback.current
+    LazyColumn(modifier = modifier, state = listState) {
         items(rows, key = { it.key }, contentType = { it::class }) { row ->
             when (row) {
-                is TreeRow.ChannelRow -> ChannelRowItem(row, settings, onJoin = {
-                    onJoin(row.channel.id)
-                }, onToggle = { onToggle(row.channel.id) })
+                is TreeRow.ChannelRow -> ChannelRowItem(
+                    row = row,
+                    settings = settings,
+                    selected = row.channel.id == selected,
+                    onSelect = {
+                        if (guard.allows()) picked = if (row.channel.id == selected) null else row.channel.id.value
+                    },
+                    onJoin = {
+                        if (guard.allows()) {
+                            picked = null
+                            onJoin(row.channel.id)
+                        }
+                    },
+                    onLongPressJoin = {
+                        if (guard.allows()) {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            picked = null
+                            onJoin(row.channel.id)
+                        }
+                    },
+                    onToggle = { onToggle(row.channel.id) },
+                )
 
                 is TreeRow.UserRow -> UserRowItem(
                     row = row,
@@ -86,12 +128,49 @@ fun ChannelList(
 
 private val INDENT = 20.dp
 
-@OptIn(ExperimentalFoundationApi::class)
+/**
+ * Ignores taps while the list scrolls and for [quietMillis] after it stops: the tap that stops a
+ * fling, or one landing as it settles, was meant for the list, not for what lies under the finger.
+ */
+internal class ScrollTapGuard(
+    private val quietMillis: Long = 300,
+    private val clock: () -> Long = SystemClock::uptimeMillis,
+) {
+    private var scrolling = false
+    private var stoppedAt = Long.MIN_VALUE / 2
+
+    fun scrolling(inProgress: Boolean) {
+        if (scrolling && !inProgress) stoppedAt = clock()
+        scrolling = inProgress
+    }
+
+    fun allows(): Boolean = !scrolling && clock() - stoppedAt >= quietMillis
+}
+
+/**
+ * The channel a Join button shows on: the one picked, while it still exists, may be entered and is
+ * not where you already are. Anything else (it was removed, you were moved there) clears the pick.
+ */
+internal fun joinCandidate(rows: List<TreeRow>, picked: ChannelId?): ChannelId? {
+    picked ?: return null
+    val row = rows.asSequence().filterIsInstance<TreeRow.ChannelRow>().firstOrNull { it.channel.id == picked }
+    return picked.takeIf { row != null && row.channel.canEnter && !row.isCurrent }
+}
+
 @Composable
-private fun ChannelRowItem(row: TreeRow.ChannelRow, settings: AppSettings, onJoin: () -> Unit, onToggle: () -> Unit) {
+private fun ChannelRowItem(
+    row: TreeRow.ChannelRow,
+    settings: AppSettings,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onJoin: () -> Unit,
+    onLongPressJoin: () -> Unit,
+    onToggle: () -> Unit,
+) {
     val busy = settings.colorizeBusyChannels && row.totalUsers >= settings.busyChannelThreshold
     val background = when {
         row.isCurrent -> MaterialTheme.colorScheme.secondaryContainer
+        selected -> MaterialTheme.colorScheme.surfaceContainerHighest
         busy -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
         else -> Color.Transparent
     }
@@ -103,7 +182,7 @@ private fun ChannelRowItem(row: TreeRow.ChannelRow, settings: AppSettings, onJoi
         else -> MaterialTheme.colorScheme.onSurface
     }
     CompositionLocalProvider(LocalContentColor provides content) {
-        ChannelRowContent(row, settings, background, onJoin, onToggle)
+        ChannelRowContent(row, settings, background, selected, onSelect, onJoin, onLongPressJoin, onToggle)
     }
 }
 
@@ -113,7 +192,10 @@ private fun ChannelRowContent(
     row: TreeRow.ChannelRow,
     settings: AppSettings,
     background: Color,
+    selected: Boolean,
+    onSelect: () -> Unit,
     onJoin: () -> Unit,
+    onLongPressJoin: () -> Unit,
     onToggle: () -> Unit,
 ) {
     Row(
@@ -125,12 +207,13 @@ private fun ChannelRowContent(
             .combinedClickable(
                 enabled = row.channel.canEnter && !row.isCurrent,
                 role = Role.Button,
-                onClickLabel = "Join channel",
-                onClick = onJoin,
-                onLongClickLabel = if (row.expanded) "Collapse" else "Expand",
-                onLongClick = onToggle,
+                onClickLabel = if (selected) "Cancel" else "Select channel",
+                onClick = onSelect,
+                onLongClickLabel = "Join channel",
+                onLongClick = onLongPressJoin,
             )
             .semantics {
+                this.selected = selected
                 contentDescription = buildString {
                     append("Channel ${row.channel.name}, ${row.totalUsers} users")
                     if (row.isCurrent) append(", you are here")
@@ -171,6 +254,11 @@ private fun ChannelRowContent(
                 color = LocalContentColor.current.copy(alpha = 0.75f),
                 modifier = Modifier.padding(start = 8.dp),
             )
+        }
+        if (selected) {
+            FilledTonalButton(onClick = onJoin, modifier = Modifier.padding(start = 8.dp)) {
+                Text("Join")
+            }
         }
     }
 }

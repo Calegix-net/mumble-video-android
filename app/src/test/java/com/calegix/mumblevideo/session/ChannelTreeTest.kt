@@ -5,10 +5,14 @@ import com.calegix.mumblevideo.core.ChannelId
 import com.calegix.mumblevideo.core.ServerState
 import com.calegix.mumblevideo.core.User
 import com.calegix.mumblevideo.core.UserSession
+import com.calegix.mumblevideo.ui.session.ScrollTapGuard
 import com.calegix.mumblevideo.ui.session.StreamingKind
 import com.calegix.mumblevideo.ui.session.TreeRow
 import com.calegix.mumblevideo.ui.session.buildTree
+import com.calegix.mumblevideo.ui.session.joinCandidate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -48,5 +52,40 @@ class ChannelTreeTest {
         val bob = buildTree(state, emptySet(), mapOf(UserSession(2) to StreamingKind.Screen))
             .filterIsInstance<TreeRow.UserRow>().single { it.user.name == "Bob" }
         assertEquals(StreamingKind.Screen, bob.streaming)
+    }
+
+    @Test
+    fun `a parent loop shows each channel once instead of recursing forever`() {
+        val normal = buildTree(state, emptySet()).map { it.key }
+        for (rootParent in listOf(ChannelId.ROOT, ChannelId(3))) {
+            val looped = state.copy(channels = state.channels + (ChannelId.ROOT to root.copy(parent = rootParent)))
+            assertEquals(normal, buildTree(looped, emptySet()).map { it.key })
+        }
+    }
+
+    @Test
+    fun `only a picked channel you may enter and are not in offers Join`() {
+        val locked = state.copy(channels = state.channels + (ChannelId(2) to b.copy(canEnter = false)))
+        val rows = buildTree(state, emptySet())
+        assertEquals(ChannelId(1), joinCandidate(rows, ChannelId(1)))
+        assertNull("nothing picked", joinCandidate(rows, null))
+        assertNull("already there", joinCandidate(rows, ChannelId(3)))
+        assertNull("gone", joinCandidate(rows, ChannelId(42)))
+        assertNull("locked", joinCandidate(buildTree(locked, emptySet()), ChannelId(2)))
+    }
+
+    @Test
+    fun `taps are ignored while the list scrolls and for 300 ms after`() {
+        var now = 10_000L
+        val guard = ScrollTapGuard(clock = { now })
+        assertTrue(guard.allows())
+        guard.scrolling(true)
+        assertFalse("mid-fling", guard.allows())
+        now += 1_000
+        guard.scrolling(false)
+        now += 299
+        assertFalse("the tap that stopped it", guard.allows())
+        now += 1
+        assertTrue(guard.allows())
     }
 }

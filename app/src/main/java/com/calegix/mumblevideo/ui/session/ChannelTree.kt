@@ -39,6 +39,9 @@ enum class StreamingKind { Camera, Screen }
  * Flattens the channel tree depth-first in Mumble's order: a channel's users come before its
  * subchannels. Collapsed channels hide everything beneath them. Empty channels are kept, as in
  * every Mumble client, so there is somewhere to tap to join.
+ *
+ * Each channel is visited once, so a parent loop (a server bug, or a half-applied move) shows a
+ * channel once instead of recursing until the stack runs out.
  */
 fun buildTree(
     state: ServerState,
@@ -46,18 +49,27 @@ fun buildTree(
     streaming: Map<UserSession, StreamingKind> = emptyMap(),
 ): List<TreeRow> {
     val root = state.channels[ChannelId.ROOT] ?: return emptyList()
-    val children = state.channels.values.groupBy { it.parent }.mapValues { (_, list) -> list.sortedWith(Channel.ORDER) }
+    val children = state.channels.values
+        .filter { it.id != it.parent }
+        .groupBy { it.parent }
+        .mapValues { (_, list) -> list.sortedWith(Channel.ORDER) }
     val usersByChannel = state.users.values.groupBy { it.channel }
         .mapValues { (_, list) -> list.sortedBy { it.name.lowercase() } }
     val selfChannel = state.selfUser?.channel
     val totals = HashMap<ChannelId, Int>()
+    val counting = HashSet<ChannelId>()
 
-    fun total(id: ChannelId): Int = totals.getOrPut(id) {
-        (usersByChannel[id]?.size ?: 0) + (children[id]?.sumOf { total(it.id) } ?: 0)
+    fun total(id: ChannelId): Int = totals[id] ?: run {
+        if (!counting.add(id)) return 0
+        val sum = (usersByChannel[id]?.size ?: 0) + (children[id]?.sumOf { total(it.id) } ?: 0)
+        totals[id] = sum
+        sum
     }
 
     val rows = ArrayList<TreeRow>(state.channels.size + state.users.size)
+    val visited = HashSet<ChannelId>()
     fun visit(channel: Channel, depth: Int) {
+        if (!visited.add(channel.id)) return
         val expanded = channel.id !in collapsed
         val subchannels = children[channel.id].orEmpty()
         rows += TreeRow.ChannelRow(
