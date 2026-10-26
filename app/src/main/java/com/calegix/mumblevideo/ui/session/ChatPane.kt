@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
@@ -149,7 +150,10 @@ private fun MessageBubble(entry: ChatEntry, loadImages: Boolean) {
                 when (part) {
                     is ChatImages.Part.Html -> {
                         val text = remember(part) { AnnotatedString.fromHtml(part.html) }
-                        Text(text, style = MaterialTheme.typography.bodyLarge, color = content)
+                        // Long-press selects, with Copy and Select all, as text does elsewhere on Android.
+                        SelectionContainer {
+                            Text(text, style = MaterialTheme.typography.bodyLarge, color = content)
+                        }
                     }
 
                     is ChatImages.Part.Image -> if (loadImages) {
