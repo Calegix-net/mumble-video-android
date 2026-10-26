@@ -121,4 +121,7 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
+    // Throwaway PKCS#12 files for the backup tests.
+    testImplementation(libs.bouncycastle.pkix)
+    testImplementation(libs.bouncycastle.prov)
 }

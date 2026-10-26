@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
@@ -51,6 +52,7 @@ enum class SettingsSection(val title: String, val summary: String, val icon: Ima
     Video("Video", "Camera, resolution, codec, data saver", Icons.Outlined.Videocam),
     Notifications("Notifications", "Messages, streams, watchers", Icons.Outlined.Notifications),
     Advanced("Advanced", "Connection, reconnecting, developer", Icons.Outlined.SettingsSuggest),
+    Backup("Backup", "Export or import servers, certificates, settings", Icons.Outlined.Backup),
     About("About", "Version, licences", Icons.Outlined.Info),
 }
 
@@ -146,6 +148,7 @@ private fun SectionContent(section: SettingsSection, modifier: Modifier = Modifi
         SettingsSection.Video -> VideoSettings(modifier)
         SettingsSection.Notifications -> NotificationSettings(modifier)
         SettingsSection.Advanced -> AdvancedSettings(modifier)
+        SettingsSection.Backup -> BackupSettings(modifier)
         SettingsSection.About -> AboutSettings(modifier)
     }
 }

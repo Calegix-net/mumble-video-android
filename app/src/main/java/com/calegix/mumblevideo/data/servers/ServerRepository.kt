@@ -92,11 +92,17 @@ class RoomServerRepository(private val dao: ServerDao) : ServerRepository {
     )
 }
 
+/** A server certificate the user accepted, as stored. */
+data class TrustedServer(val sha256: String, val address: ServerAddress, val acceptedAtEpochMillis: Long)
+
 /** Server certificates the user accepted from a trust prompt. */
 interface TrustStore {
     val count: Flow<Int>
 
     suspend fun fingerprints(): Set<String>
+
+    /** Every accepted certificate, for backups. */
+    suspend fun all(): List<TrustedServer>
 
     suspend fun trust(sha256: String, address: ServerAddress, at: Long)
 
@@ -107,6 +113,9 @@ class RoomTrustStore(private val dao: TrustedCertificateDao) : TrustStore {
     override val count: Flow<Int> = dao.observeCount()
 
     override suspend fun fingerprints(): Set<String> = dao.fingerprints().toSet()
+
+    override suspend fun all(): List<TrustedServer> =
+        dao.all().map { TrustedServer(it.sha256, ServerAddress(it.host, it.port), it.acceptedAtEpochMillis) }
 
     override suspend fun trust(sha256: String, address: ServerAddress, at: Long) =
         dao.insert(TrustedCertificateEntity(sha256, address.host, address.port, at))
@@ -138,14 +147,17 @@ class InMemoryServerRepository(initial: List<SavedServer> = emptyList()) : Serve
 }
 
 class InMemoryTrustStore : TrustStore {
-    private val state = MutableStateFlow(emptySet<String>())
+    private val state = MutableStateFlow(emptyMap<String, TrustedServer>())
     override val count: Flow<Int> = state.map { it.size }
 
-    override suspend fun fingerprints(): Set<String> = state.value
+    override suspend fun fingerprints(): Set<String> = state.value.keys
 
-    override suspend fun trust(sha256: String, address: ServerAddress, at: Long) = state.update { it + sha256 }
+    override suspend fun all(): List<TrustedServer> = state.value.values.toList()
+
+    override suspend fun trust(sha256: String, address: ServerAddress, at: Long) =
+        state.update { it + (sha256 to TrustedServer(sha256, address, at)) }
 
     override suspend fun clear() {
-        state.value = emptySet()
+        state.value = emptyMap()
     }
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import com.calegix.mumblevideo.client.NativeMumbleCore
 import com.calegix.mumblevideo.core.MumbleCore
 import com.calegix.mumblevideo.core.fake.FakeMumbleCore
+import com.calegix.mumblevideo.data.backup.BackupManager
 import com.calegix.mumblevideo.data.certificates.CertificateRepository
 import com.calegix.mumblevideo.data.certificates.FileCertificateRepository
 import com.calegix.mumblevideo.data.db.AppDatabase
@@ -57,6 +58,10 @@ class AppContainer(context: Context) {
         FileCertificateRepository(database.certificates(), File(appContext.filesDir, "certificates"))
     val publicServers: PublicServerSource = StubPublicServerSource()
     val pinger: ServerPinger = UdpServerPinger()
+    val backup = BackupManager(servers, certificates, trustStore, settings, core::inspectCertificate)
+
+    /** Where `adb push` can leave a backup for the app to offer on launch (no permission needed). */
+    val backupDropInDirectory: File? by lazy { appContext.getExternalFilesDir(null)?.let { File(it, "import") } }
 
     val session = SessionController(
         core = core,
