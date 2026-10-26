@@ -10,6 +10,7 @@ import com.calegix.mumblevideo.ui.servers.PublicServersViewModel
 import com.calegix.mumblevideo.ui.servers.ServerListViewModel
 import com.calegix.mumblevideo.ui.session.ChatViewModel
 import com.calegix.mumblevideo.ui.session.SessionViewModel
+import com.calegix.mumblevideo.ui.settings.BackupViewModel
 import com.calegix.mumblevideo.ui.settings.CertificatesViewModel
 import com.calegix.mumblevideo.ui.settings.SettingsViewModel
 import com.calegix.mumblevideo.ui.video.VideoViewModel
@@ -26,6 +27,10 @@ object AppViewModelProvider {
         initializer { SettingsViewModel(container().settings, container().core, container().trustStore) }
         initializer {
             CertificatesViewModel(container().core, container().certificates, container().settings)
+        }
+        initializer {
+            val container = container()
+            BackupViewModel(container.backup) { container.backupDropInDirectory }
         }
     }
 

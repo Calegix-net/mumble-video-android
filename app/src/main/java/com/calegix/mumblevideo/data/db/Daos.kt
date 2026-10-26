@@ -52,6 +52,9 @@ interface TrustedCertificateDao {
     @Query("SELECT sha256 FROM trusted_server_certificates")
     suspend fun fingerprints(): List<String>
 
+    @Query("SELECT * FROM trusted_server_certificates")
+    suspend fun all(): List<TrustedCertificateEntity>
+
     @Query("SELECT COUNT(*) FROM trusted_server_certificates")
     fun observeCount(): Flow<Int>
 

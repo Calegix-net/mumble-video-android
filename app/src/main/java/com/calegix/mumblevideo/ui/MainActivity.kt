@@ -28,6 +28,9 @@ import com.calegix.mumblevideo.BuildConfig
 import com.calegix.mumblevideo.ui.navigation.AppNavHost
 import com.calegix.mumblevideo.ui.session.ChatImages
 import com.calegix.mumblevideo.ui.session.loadPicture
+import com.calegix.mumblevideo.ui.settings.BackupDropInDialog
+import com.calegix.mumblevideo.ui.settings.BackupResultDialog
+import com.calegix.mumblevideo.ui.settings.BackupViewModel
 import com.calegix.mumblevideo.ui.theme.MumbleVideoTheme
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +45,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private val viewModel: MainViewModel by viewModels { AppViewModelProvider.Factory }
+    private val backupViewModel: BackupViewModel by viewModels { AppViewModelProvider.Factory }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
@@ -55,6 +59,8 @@ class MainActivity : ComponentActivity() {
         // recents, still holds the old intent and must not reopen the add-server form.
         val fromHistory = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
         if (savedInstanceState == null && !fromHistory) handleIntent(intent)
+        // A backup pushed into files/import/ over adb is offered, never imported silently.
+        backupViewModel.checkDropIn()
 
         setContent {
             val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -63,6 +69,7 @@ class MainActivity : ComponentActivity() {
             val link by viewModel.pendingLink.collectAsStateWithLifecycle()
             val shared by viewModel.sharedPicture.collectAsStateWithLifecycle()
             val keepOn by viewModel.keepScreenOn.collectAsStateWithLifecycle()
+            val backup by backupViewModel.uiState.collectAsStateWithLifecycle()
 
             LaunchedEffect(keepOn) {
                 if (keepOn) {
@@ -98,6 +105,14 @@ class MainActivity : ComponentActivity() {
                             onDismiss = viewModel::dismissSharedPicture,
                         )
                     }
+                    backup.dropIn?.let { file ->
+                        BackupDropInDialog(
+                            fileName = file.name,
+                            onImport = backupViewModel::importDropIn,
+                            onDismiss = backupViewModel::dismissDropIn,
+                        )
+                    }
+                    backup.result?.let { BackupResultDialog(it, onDismiss = backupViewModel::consumeResult) }
                     dialog?.let {
                         ConnectionDialogHost(
                             dialog = it,
