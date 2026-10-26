@@ -2,7 +2,6 @@ package com.calegix.mumblevideo.ui.session
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -49,12 +48,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -68,6 +69,8 @@ import androidx.core.net.toUri
 import com.calegix.mumblevideo.core.MessageTarget
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun ChatPane(
@@ -284,7 +287,14 @@ private fun Composer(
 
 @Composable
 private fun ChatImage(bytes: ByteArray, description: String) {
-    val bitmap = remember(bytes) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }
+    // Decoded off the main thread and within ChatImages' size limits: a crafted picture can
+    // declare a size far beyond what the phone has memory for.
+    // Null while decoding, then a list holding the picture or nothing if it could not be shown.
+    val decoded by produceState<List<ImageBitmap>?>(null, bytes) {
+        value = withContext(Dispatchers.Default) { listOfNotNull(ChatImages.decode(bytes)?.asImageBitmap()) }
+    }
+    val result = decoded ?: return
+    val bitmap = result.firstOrNull()
     if (bitmap == null) {
         Text("Picture could not be shown", style = MaterialTheme.typography.bodyMedium)
         return

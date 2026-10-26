@@ -52,4 +52,22 @@ class ChatImagesTest {
             }
         }
     }
+
+    @Test fun oversizedPayloadsAreNotDecoded() {
+        val big = "A".repeat(ImageBounds.MAX_ENCODED_CHARS + 4)
+        val part = ChatImages.split("""<img src="data:image/png;base64,$big">""").single()
+        assertTrue(part is ChatImages.Part.Html && part.html.contains("too large"))
+        val wrapped = "AAAA&#10;".repeat(ImageBounds.MAX_ENCODED_CHARS)
+        val part2 = ChatImages.split("""<img src="data:image/png;base64,$wrapped">""").single()
+        assertTrue(part2 is ChatImages.Part.Html && part2.html.contains("too large"))
+        // At the limit it still decodes.
+        val atLimit = "A".repeat(ImageBounds.MAX_ENCODED_CHARS)
+        assertTrue(ChatImages.split("""<img src="data:image/png;base64,$atLimit">""").single() is ChatImages.Part.Image)
+    }
+
+    @Test fun hugeTextIsCut() {
+        val part = ChatImages.split("x".repeat(8_000_000)).single() as ChatImages.Part.Html
+        assertTrue(part.html.length < ChatImages.MAX_TEXT_CHARS + 32)
+        assertEquals("short", (ChatImages.split("short").single() as ChatImages.Part.Html).html)
+    }
 }
