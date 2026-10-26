@@ -7,6 +7,9 @@ import com.calegix.mumblevideo.core.StreamKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -27,6 +30,10 @@ class SubscriptionManager(
 
     private val entries = mutableMapOf<StreamKey, Entry>()
     private val surfaces = mutableMapOf<StreamKey, Surface>()
+    private val _watching = MutableStateFlow(false)
+
+    /** Whether any stream is being drawn on screen right now. */
+    val watching: StateFlow<Boolean> = _watching.asStateFlow()
 
     /** Starts (or keeps) a subscription. [bandwidth] is the preferred ceiling, 0 for none. */
     fun acquire(stream: StreamKey, bandwidth: Int = 0) {
@@ -66,12 +73,14 @@ class SubscriptionManager(
      */
     fun attachSurface(stream: StreamKey, surface: Surface) {
         surfaces[stream] = surface
+        _watching.value = true
         core.setVideoSurface(stream, surface)
     }
 
     fun detachSurface(stream: StreamKey, surface: Surface) {
         if (surfaces[stream] !== surface) return
         surfaces.remove(stream)
+        _watching.value = surfaces.isNotEmpty()
         core.setVideoSurface(stream, null)
     }
 
@@ -101,6 +110,7 @@ class SubscriptionManager(
         entries.values.forEach { it.release?.cancel() }
         entries.clear()
         surfaces.clear()
+        _watching.value = false
     }
 
     private suspend fun subscribe(stream: StreamKey, bandwidth: Int) {

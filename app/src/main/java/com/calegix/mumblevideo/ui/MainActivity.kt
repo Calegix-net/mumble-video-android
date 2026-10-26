@@ -25,7 +25,6 @@ import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.calegix.mumblevideo.BuildConfig
-import com.calegix.mumblevideo.core.ConnectionState
 import com.calegix.mumblevideo.ui.navigation.AppNavHost
 import com.calegix.mumblevideo.ui.session.ChatImages
 import com.calegix.mumblevideo.ui.session.loadPicture
@@ -63,8 +62,8 @@ class MainActivity : ComponentActivity() {
             val dialog by viewModel.dialog.collectAsStateWithLifecycle()
             val link by viewModel.pendingLink.collectAsStateWithLifecycle()
             val shared by viewModel.sharedPicture.collectAsStateWithLifecycle()
+            val keepOn by viewModel.keepScreenOn.collectAsStateWithLifecycle()
 
-            val keepOn = settings.keepScreenOn && connection is ConnectionState.Connected
             LaunchedEffect(keepOn) {
                 if (keepOn) {
                     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

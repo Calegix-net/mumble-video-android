@@ -51,6 +51,7 @@ import com.calegix.mumblevideo.core.EchoCancellation
 import com.calegix.mumblevideo.core.VideoCodec
 import com.calegix.mumblevideo.core.VoiceInputMode
 import com.calegix.mumblevideo.data.settings.AppSettings
+import com.calegix.mumblevideo.data.settings.KeepScreenAwake
 import com.calegix.mumblevideo.data.settings.PttButtonSize
 import com.calegix.mumblevideo.data.settings.ThemeMode
 import com.calegix.mumblevideo.data.settings.VideoResolution
@@ -80,12 +81,17 @@ fun GeneralSettings(
 ) {
     val s = settingsState(viewModel)
     SettingsColumn(modifier) {
-        PreferenceCategory("While connected")
-        SwitchPreference(
+        PreferenceCategory("Screen")
+        ListPreference(
             "Keep screen on",
-            s.keepScreenOn,
-            { v -> viewModel.update { it.copy(keepScreenOn = v) } },
-            summary = "Stop the screen sleeping while the app is open and connected",
+            listOf(
+                KeepScreenAwake.Off to "Off",
+                KeepScreenAwake.WhileVideo to "While video is streaming",
+                KeepScreenAwake.WhileOpen to "Whenever the app is open",
+            ),
+            s.screenAwake,
+            { v -> viewModel.update { it.copy(keepScreenAwake = v, keepScreenOn = false) } },
+            summary = "Streaming means sending a camera or screen, or watching someone's video",
         )
         SwitchPreference(
             "Keep screen on while sharing",
