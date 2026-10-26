@@ -37,6 +37,20 @@ class MainViewModel(
 
     val connectionState: StateFlow<ConnectionState> = session.core.connectionState
 
+    /** Keep screen on (Settings > General), for the window while the app is in front. */
+    val keepScreenOn: StateFlow<Boolean> = combine(
+        settings.settings,
+        session.core.connectionState,
+        session.core.localVideo,
+        session.subscriptions.watching,
+    ) { s, state, local, watching ->
+        s.keepsScreenOn(
+            connected = state is ConnectionState.Connected,
+            sendingVideo = local.camera != null || local.screen != null,
+            watchingVideo = watching,
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     private val dismissed = MutableStateFlow<ConnectionState?>(null)
 
     val dialog: StateFlow<ConnectionDialog?> = combine(session.core.connectionState, dismissed) { state, gone ->

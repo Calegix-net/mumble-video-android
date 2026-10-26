@@ -17,6 +17,9 @@ enum class VideoResolution(val width: Int, val height: Int, val label: String) {
     P1080(1920, 1080, "1080p"),
 }
 
+/** When the app stops the screen sleeping while it is in front. */
+enum class KeepScreenAwake { Off, WhileVideo, WhileOpen }
+
 /** Size of the on-screen push-to-talk button. */
 enum class PttButtonSize(val heightDp: Int) { Small(56), Medium(88), Large(140) }
 
@@ -28,6 +31,9 @@ enum class PttButtonSize(val heightDp: Int) { Small(56), Medium(88), Large(140) 
 @Serializable
 data class AppSettings(
     // General
+    /** Null until chosen; see [screenAwake]. */
+    val keepScreenAwake: KeepScreenAwake? = null,
+    /** The old on/off switch (while connected), read only to migrate it. */
     val keepScreenOn: Boolean = false,
     val keepScreenOnWhileSharing: Boolean = true,
     val textToSpeech: Boolean = false,
@@ -95,6 +101,18 @@ data class AppSettings(
     /** Talk to the scripted fake server instead of real ones. Applies on the next app start. */
     val useSimulatedCore: Boolean = false,
 ) {
+    /** The chosen [keepScreenAwake]; someone who had the old switch on gets the app-open choice. */
+    val screenAwake: KeepScreenAwake
+        get() = keepScreenAwake ?: if (keepScreenOn) KeepScreenAwake.WhileOpen else KeepScreenAwake.WhileVideo
+
+    /** Whether the app's window should keep the screen on right now. */
+    fun keepsScreenOn(connected: Boolean, sendingVideo: Boolean, watchingVideo: Boolean): Boolean =
+        when (screenAwake) {
+            KeepScreenAwake.Off -> false
+            KeepScreenAwake.WhileVideo -> connected && (sendingVideo || watchingVideo)
+            KeepScreenAwake.WhileOpen -> true
+        }
+
     fun toAudioConfig(): AudioConfig = AudioConfig(
         inputMode = inputMode,
         vadThreshold = vadThreshold,
