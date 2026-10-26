@@ -65,19 +65,49 @@ jobs:
           path: out/
           if-no-files-found: error
 
-      # Every build of main replaces the "latest" pre-release, so there is always one link to the
-      # newest APK; v* tags get a release of their own that stays.
+      # Every build of main updates the "latest" pre-release in place, so there is always one link to
+      # the newest APK (releases/download/latest/mumble-video-android.apk) and it never 404s: deleting
+      # and recreating the release left that link dead until the new upload finished, and for good if
+      # the run was cancelled in between. The new APK goes up under a temporary name and is then
+      # renamed over the old one, a gap of one API call. v* tags get a release of their own that stays.
       - name: Publish latest build
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete latest --cleanup-tag --yes 2>/dev/null || true
+          set -euo pipefail
+          short="${GITHUB_SHA::7}"
+          title="Latest build ($short)"
+          notes="Built from $short on main. Development build; installs over earlier ones."
           cp out/*.apk out/mumble-video-android.apk
           (cd out && sha256sum *.apk > SHA256SUMS)
-          gh release create latest out/* --prerelease --target "$GITHUB_SHA" \
-            --title "Latest build (${GITHUB_SHA::7})" \
-            --notes "Built from ${GITHUB_SHA::7} on main. Development build; installs over earlier ones."
+          if ! gh release view latest > /dev/null 2>&1; then
+            gh release create latest out/* --prerelease --target "$GITHUB_SHA" --title "$title" --notes "$notes"
+            exit 0
+          fi
+          release=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/latest" --jq .id)
+          asset_id() { gh api "repos/$GITHUB_REPOSITORY/releases/$release/assets" --paginate --jq ".[] | select(.name == \"$1\") | .id"; }
+          # Everything goes up first: the per-commit APK under its own new name, and the files with
+          # stable names beside the ones they replace (gh's --clobber deletes the old asset before it
+          # uploads, which is the same gap again). Then each stable name is swapped in one rename.
+          for name in mumble-video-android.apk SHA256SUMS; do ln -f "out/$name" "out/next-$name"; done
+          gh release upload latest out/mumble-video-android-"$short"*.apk out/next-* --clobber
+          for name in mumble-video-android.apk SHA256SUMS; do
+            new=$(asset_id "next-$name")
+            old=$(asset_id "$name")
+            [ -z "$old" ] || gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$old"
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/assets/$new" -f name="$name" > /dev/null
+          done
+          # Move the tag to this commit (the download links go by the tag's name, so they work even if
+          # this fails), then drop the previous builds' per-commit APKs.
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true > /dev/null ||
+            echo "::warning::could not move the latest tag to $short"
+          gh release edit latest --prerelease --title "$title" --notes "$notes"
+          keep="mumble-video-android.apk SHA256SUMS $(cd out && ls mumble-video-android-$short*.apk)"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release/assets" --paginate --jq '.[] | "\(.id) \(.name)"' |
+            while read -r id name; do
+              case " $keep " in *" $name "*) ;; *) gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$id" ;; esac
+            done
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
