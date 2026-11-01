@@ -425,6 +425,12 @@ fun VideoSettings(
                 summary = "Also switchable from the Video tab while sharing",
             )
         }
+        SwitchPreference(
+            "Ask before starting the camera",
+            s.confirmCameraStart,
+            { v -> viewModel.update { it.copy(confirmCameraStart = v) } },
+            summary = "Shows which camera is about to go live",
+        )
         ListPreference("Resolution", resolutions, s.cameraResolution, { v ->
             viewModel.update { it.copy(cameraResolution = v) }
         })

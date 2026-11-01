@@ -38,10 +38,12 @@ import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.VideocamOff
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -68,6 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.calegix.mumblevideo.core.CameraFacing
 import com.calegix.mumblevideo.core.StreamKey
 import com.calegix.mumblevideo.core.Subscription
 import com.calegix.mumblevideo.ui.AppViewModelProvider
@@ -148,10 +151,18 @@ fun VideoPane(
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
+    state.cameraConfirm?.let { confirm ->
+        CameraConfirmDialog(
+            confirm,
+            onStart = viewModel::confirmCamera,
+            onSwitch = viewModel::switchCamera,
+            onDismiss = viewModel::cancelCamera,
+        )
+    }
 }
 
 @Composable
-private fun OwnVideoControls(
+internal fun OwnVideoControls(
     state: VideoUiState,
     onToggleCamera: () -> Unit,
     onSwitchCamera: () -> Unit,
@@ -220,10 +231,79 @@ private fun OwnVideoControls(
                 Text(if (sharing) "Stop sharing" else "Share screen", modifier = Modifier.padding(start = 8.dp))
             }
         }
+        state.cameraFacing?.let { facing -> LiveCameraLabel(facing) }
         if (cameraOn || sharing) {
             WatchingList(state.watchers)
         }
     }
+}
+
+/** "Rear camera is live": says which way the streaming camera points, so nobody shares the wrong side. */
+@Composable
+private fun LiveCameraLabel(facing: CameraFacing) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .semantics(mergeDescendants = true) {},
+    ) {
+        Icon(
+            Icons.Outlined.Videocam,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            "${facing.label} camera is live",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.padding(start = 8.dp),
+        )
+    }
+}
+
+@Composable
+internal fun CameraConfirmDialog(
+    confirm: CameraConfirm,
+    onStart: (dontAskAgain: Boolean) -> Unit,
+    onSwitch: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var dontAsk by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.Videocam, contentDescription = null) },
+        title = { Text("Start ${confirm.camera.facing.label.lowercase()} camera?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(confirm.camera.name, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Everyone in your channel can watch it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (confirm.cameraCount > 1) {
+                    OutlinedButton(onClick = onSwitch) {
+                        Icon(Icons.Outlined.Cameraswitch, contentDescription = null)
+                        Text("Switch camera", modifier = Modifier.padding(start = 8.dp))
+                    }
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .toggleable(value = dontAsk, role = Role.Checkbox, onValueChange = { dontAsk = it }),
+                ) {
+                    Checkbox(checked = dontAsk, onCheckedChange = null)
+                    Text("Don't ask again", modifier = Modifier.padding(start = 8.dp))
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onStart(dontAsk) }) { Text("Start") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
