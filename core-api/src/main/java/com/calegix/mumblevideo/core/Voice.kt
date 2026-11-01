@@ -46,9 +46,10 @@ data class AudioConfig(
     val bluetoothHeadset: Boolean = true,
     /**
      * With a car's Bluetooth connected, play voice as media (A2DP) and record from the phone,
-     * instead of placing a hands-free call: the car does not show a call or drop to call quality.
+     * instead of placing a hands-free call: the car does not show a call or drop to call quality,
+     * but its microphone isn't used. Off by default: the car's microphone is the usual choice.
      */
-    val carAsMedia: Boolean = true,
+    val carAsMedia: Boolean = false,
     /**
      * Android Auto is showing this phone on a car's screen. With [carAsMedia] that counts as a car
      * too: Android Auto shows any app in call mode as a phone call, so voice plays as media.

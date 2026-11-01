@@ -6,33 +6,35 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AudioRoutingTest {
+    private val phoneMic = AudioConfig(carAsMedia = true)
+
     private fun media(config: AudioConfig, bluetoothCar: Boolean = false) =
         AudioRouting.playAsMedia(config, bluetoothCar)
 
     @Test
-    fun `Android Auto plays as media, not as a call`() {
-        assertTrue(media(AudioConfig(carProjection = true)))
+    fun `by default the car's microphone is used, so a car keeps the call`() {
+        assertFalse(media(AudioConfig(carProjection = true)))
+        assertFalse(media(AudioConfig(), bluetoothCar = true))
+    }
+
+    @Test
+    fun `with the phone's microphone chosen, Android Auto plays as media, not as a call`() {
+        assertTrue(media(phoneMic.copy(carProjection = true)))
     }
 
     @Test
     fun `Android Auto counts even with Bluetooth headsets turned off`() {
-        assertTrue(media(AudioConfig(carProjection = true, bluetoothHeadset = false)))
+        assertTrue(media(phoneMic.copy(carProjection = true, bluetoothHeadset = false)))
     }
 
     @Test
-    fun `turning car-as-media off keeps the call, Android Auto or not`() {
-        assertFalse(media(AudioConfig(carProjection = true, carAsMedia = false)))
-        assertFalse(media(AudioConfig(carAsMedia = false), bluetoothCar = true))
-    }
-
-    @Test
-    fun `a car's Bluetooth still plays as media, as before`() {
-        assertTrue(media(AudioConfig(), bluetoothCar = true))
-        assertFalse(media(AudioConfig(bluetoothHeadset = false), bluetoothCar = true))
+    fun `a car's Bluetooth plays as media with the phone's microphone, as before`() {
+        assertTrue(media(phoneMic, bluetoothCar = true))
+        assertFalse(media(phoneMic.copy(bluetoothHeadset = false), bluetoothCar = true))
     }
 
     @Test
     fun `no car means a call as usual`() {
-        assertFalse(media(AudioConfig()))
+        assertFalse(media(phoneMic))
     }
 }
