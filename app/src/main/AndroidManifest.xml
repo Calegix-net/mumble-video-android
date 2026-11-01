@@ -73,5 +73,21 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/chat_photos" />
         </provider>
+
+        <!-- Android Auto: the car screen (car/), built from Car App Library templates. -->
+        <service
+            android:name=".car.MumbleCarAppService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.IOT" />
+            </intent-filter>
+        </service>
+        <meta-data
+            android:name="androidx.car.app.minCarApiLevel"
+            android:value="1" />
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
     </application>
 </manifest>
