@@ -12,6 +12,7 @@ import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestDispatcher
@@ -33,7 +34,11 @@ class MainDispatcherRule(val dispatcher: TestDispatcher = StandardTestDispatcher
 }
 
 /** A complete app graph on in-memory storage and a deterministic fake core. */
-class TestGraph(scope: TestScope, settings: AppSettings = AppSettings()) {
+class TestGraph(
+    scope: TestScope,
+    settings: AppSettings = AppSettings(),
+    carProjection: Flow<Boolean> = flowOf(false),
+) {
     val core =
         FakeMumbleCore(scope = scope.backgroundScope, random = Random(42), simulateActivity = false, clock = { 1_000L })
     val settings = InMemorySettingsRepository(settings)
@@ -41,7 +46,16 @@ class TestGraph(scope: TestScope, settings: AppSettings = AppSettings()) {
     val trust = InMemoryTrustStore()
     val certificates = InMemoryCertificateRepository()
     val session =
-        SessionController(core, this.settings, servers, certificates, trust, scope.backgroundScope, clock = { 1_000L })
+        SessionController(
+            core,
+            this.settings,
+            servers,
+            certificates,
+            trust,
+            scope.backgroundScope,
+            clock = { 1_000L },
+            carProjection = carProjection,
+        )
 
     /** Connects to [server], accepts its certificate and waits for the session to sync. */
     suspend fun TestScope.connect(server: SavedServer = SERVER) {

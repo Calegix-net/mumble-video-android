@@ -49,6 +49,11 @@ data class AudioConfig(
      * instead of placing a hands-free call: the car does not show a call or drop to call quality.
      */
     val carAsMedia: Boolean = true,
+    /**
+     * Android Auto is showing this phone on a car's screen. With [carAsMedia] that counts as a car
+     * too: Android Auto shows any app in call mode as a phone call, so voice plays as media.
+     */
+    val carProjection: Boolean = false,
     /** Silence playback while transmitting, for speakerphone use without echo cancellation. */
     val halfDuplex: Boolean = false,
     /** Push-to-talk toggles on press instead of being held. */

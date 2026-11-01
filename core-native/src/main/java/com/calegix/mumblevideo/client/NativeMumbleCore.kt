@@ -1682,6 +1682,7 @@ class NativeMumbleCore(private val context: Context) : MumbleCore {
         }
         link?.applyVoiceToAudio()
         monitor?.config = config
+        routing.update(config)
     }
 
     override fun setPushToTalk(pressed: Boolean) {

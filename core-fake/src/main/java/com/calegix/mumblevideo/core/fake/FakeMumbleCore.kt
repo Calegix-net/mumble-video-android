@@ -129,8 +129,10 @@ class FakeMumbleCore(
         MutableSharedFlow<CoreEvent>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val events: Flow<CoreEvent> = _events.asSharedFlow()
 
+    /** The last [setAudioConfig], for tests. */
     @Volatile
-    private var audioConfig = AudioConfig()
+    var audioConfig = AudioConfig()
+        private set
 
     private var connectionJob: Job? = null
     private var request: ConnectRequest? = null
