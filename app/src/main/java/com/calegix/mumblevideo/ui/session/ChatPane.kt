@@ -191,9 +191,10 @@ private fun MessagePart(
     when (part) {
         is ChatImages.Part.Html -> {
             val text = remember(part) { AnnotatedString.fromHtml(part.html) }
-            // Long-press selects, with Copy and Select all, as text does elsewhere on Android.
+            // Long-press selects, with Copy and Select all, as text does elsewhere on Android; on a
+            // link it copies the link instead.
             SelectionContainer {
-                Text(text, style = MaterialTheme.typography.bodyLarge, color = content)
+                LinkText(text, style = MaterialTheme.typography.bodyLarge, color = content)
             }
         }
 
