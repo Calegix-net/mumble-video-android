@@ -11,6 +11,9 @@ object Notifications {
     const val ID_CONNECTION = 1
     const val ID_MESSAGES = 2
 
+    /** Plus the sender's session: one notification per person writing to you privately. */
+    const val ID_PRIVATE_MESSAGES = 1000
+
     fun createChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannels(

@@ -1,5 +1,6 @@
 package com.calegix.mumblevideo.service
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.media.session.MediaSession
@@ -30,6 +31,8 @@ class HeadsetButton(
 ) {
     private val media = MediaSession(context, "MumbleVideoPtt").apply {
         setCallback(
+            // Buttons only: Android Auto's voice search goes to the car's own session (car/CarMediaService).
+            @SuppressLint("MissingOnPlayFromSearch")
             object : MediaSession.Callback() {
                 override fun onMediaButtonEvent(intent: Intent): Boolean {
                     val event =

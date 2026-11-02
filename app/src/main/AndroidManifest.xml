@@ -51,6 +51,12 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="mumble" />
             </intent-filter>
+            <!-- "Play … on Mumble Video" from the phone's Assistant opens the app; the car's voice
+                 search goes to car/CarMediaService instead. -->
+            <intent-filter>
+                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
             <!-- Share a picture from any app into the current channel. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -73,5 +79,25 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/chat_photos" />
         </provider>
+
+        <!-- Chat notifications answered from the notification or the car, without opening the app. -->
+        <receiver
+            android:name=".service.ChatReplyReceiver"
+            android:exported="false" />
+
+        <!-- Android Auto: the car browses servers and channels and controls the session here. -->
+        <service
+            android:name=".car.CarMediaService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+        <meta-data
+            android:name="com.google.android.gms.car.notification.SmallIcon"
+            android:resource="@drawable/ic_notification" />
     </application>
 </manifest>
