@@ -22,6 +22,7 @@ navigation = "2.10.2"
 datastore = "1.2.1"
 room = "2.8.5"
 coroutines = "1.11.0"
+media = "1.7.0"
 serialization = "1.11.0"
 
 junit = "4.13.2"
@@ -41,6 +42,7 @@ androidx-car-app = { module = "androidx.car.app:app", version.ref = "car-app" }
 androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "lifecycle" }
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigation" }
 androidx-datastore = { module = "androidx.datastore:datastore", version.ref = "datastore" }
+androidx-media = { module = "androidx.media:media", version.ref = "media" }
 androidx-room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 androidx-room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
 androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }

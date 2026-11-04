@@ -77,6 +77,9 @@ class AppContainer(context: Context) {
         carProjection = carProjection(appContext),
     )
 
+    /** Chat notifications; [com.calegix.mumblevideo.service.ChatReplyReceiver] answers them through it. */
+    val messageNotifier = MessageNotifier(appContext, session, settings, appScope)
+
     init {
         // Builds before the real core seeded every list with the fake core's scripted servers, which
         // only confuse a real session. Remove exactly those rows; a user's own entries never match.
@@ -88,7 +91,7 @@ class AppContainer(context: Context) {
         fakeCore?.let { fake ->
             appScope.launch { settings.settings.collect { fake.simulateConnectionDrops = it.simulateConnectionDrops } }
         }
-        MessageNotifier(appContext, session, settings, appScope).start()
+        messageNotifier.start()
         VoiceFeedback(appContext, session, settings, appScope).start()
     }
 }

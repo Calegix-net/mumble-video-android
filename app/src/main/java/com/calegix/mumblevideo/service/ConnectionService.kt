@@ -227,7 +227,13 @@ class ConnectionService : LifecycleService() {
         private const val ACTION_STOP_SHARING = "com.calegix.mumblevideo.action.STOP_SHARING"
 
         fun start(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, ConnectionService::class.java))
+            try {
+                ContextCompat.startForegroundService(context, Intent(context, ConnectionService::class.java))
+            } catch (e: IllegalStateException) {
+                // Android 12+ refuses from the background unless an exemption applies (a car's media
+                // controls get one). Connecting still works; only the ongoing notification is missing.
+                Log.w("MvService", "could not start the connection service", e)
+            }
         }
     }
 }

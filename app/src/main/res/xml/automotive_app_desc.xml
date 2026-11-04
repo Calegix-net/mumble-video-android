@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android Auto: a media source (car/CarMediaService) and chat notifications the car can read out
+  and reply to. Sideloaded builds only show in the car as these; template apps must come from Play.
+-->
+<automotiveApp>
+    <uses name="media" />
+    <uses name="notification" />
+</automotiveApp>

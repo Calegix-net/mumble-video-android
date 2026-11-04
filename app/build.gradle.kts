@@ -105,6 +105,8 @@ dependencies {
     implementation(libs.androidx.car.app)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore)
+    // Android Auto: the car lists the app as a media source (see car/CarMediaService).
+    implementation(libs.androidx.media)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
