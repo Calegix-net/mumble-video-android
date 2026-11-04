@@ -149,7 +149,7 @@ private fun TextBlock(block: RichBlock.Text, style: RichStyle) {
         block.marker?.let {
             Text(it, style = textStyle, color = style.color, modifier = Modifier.padding(end = 6.dp))
         }
-        Text(block.text, style = textStyle, color = style.color, textAlign = align, modifier = fill)
+        LinkText(block.text, style = textStyle, color = style.color, textAlign = align, modifier = fill)
     }
 }
 
