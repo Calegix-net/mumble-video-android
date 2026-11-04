@@ -12,15 +12,21 @@ import com.calegix.mumblevideo.data.certificates.CertificateRepository
 import com.calegix.mumblevideo.data.servers.SavedServer
 import com.calegix.mumblevideo.data.servers.ServerRepository
 import com.calegix.mumblevideo.data.servers.TrustStore
+import com.calegix.mumblevideo.data.settings.AppSettings
 import com.calegix.mumblevideo.data.settings.SettingsRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -43,7 +49,11 @@ class SessionController(
     private val autoCertificate: Boolean = false,
     /** Hands the screen-capture consent to the core (the native core needs it; the fake does not). */
     private val authorizeScreenCapture: (resultCode: Int, data: Intent) -> Unit = { _, _ -> },
+    /** Whether Android Auto is showing the phone on a car's screen; see [carProjection]. */
+    carProjection: Flow<Boolean> = flowOf(false),
 ) {
+    private val projecting = carProjection.stateIn(scope, SharingStarted.Eagerly, false)
+
     private val _screenCaptureForeground = MutableStateFlow(false)
 
     /** Whether the foreground service must declare the media-projection type. */
@@ -98,7 +108,9 @@ class SessionController(
             }
         }
         scope.launch {
-            settings.settings.map { it.toAudioConfig() }.distinctUntilChanged().collect { core.setAudioConfig(it) }
+            combine(settings.settings, projecting, ::audioConfig).distinctUntilChanged().collect {
+                core.setAudioConfig(it)
+            }
         }
         // A reconnect is a new session on the server: pick the videos being watched up again.
         scope.launch {
@@ -112,6 +124,8 @@ class SessionController(
         }
     }
 
+    private fun audioConfig(settings: AppSettings, car: Boolean) = settings.toAudioConfig().copy(carProjection = car)
+
     suspend fun connect(server: SavedServer) {
         if (autoCertificate) ensureCertificate()
         val current = settings.settings.value
@@ -121,7 +135,7 @@ class SessionController(
         _unreadMessages.value = 0
         subscriptions.clear()
         onSessionStarting()
-        core.setAudioConfig(current.toAudioConfig())
+        core.setAudioConfig(audioConfig(current, projecting.value))
         core.connect(
             ConnectRequest(
                 server = server.address,

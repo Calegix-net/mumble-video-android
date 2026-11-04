@@ -26,7 +26,9 @@ import com.calegix.mumblevideo.core.AudioOutputStream
  * call with a running timer, drops voice to call quality and stalls while the link switches over,
  * so with [AudioConfig.carAsMedia] the session leaves call mode while a car is connected: voice
  * plays as media over A2DP and the phone's own microphone records. [onStream] tells playback
- * which stream that means, since media and call audio go to different places.
+ * which stream that means, since media and call audio go to different places. Android Auto
+ * ([AudioConfig.carProjection]) counts as a car whatever the link: it shows any app in call mode
+ * as a phone call on the car's screen.
  *
  * The choice is made again whenever an audio device comes or goes, so headphones connected
  * mid-call take over the microphone and the sound, and disconnecting them falls back. Undone by
@@ -62,13 +64,22 @@ internal class AudioRouting(private val context: Context) {
         audio.registerAudioDeviceCallback(devices, handler)
     }
 
+    /** New settings mid-session (Android Auto connecting, a switch flipped): choose again. */
+    fun update(config: AudioConfig) {
+        handler.post {
+            this.config = config
+            choose()
+        }
+    }
+
     private fun choose() {
         if (!active) return
         val car = if (config.bluetoothHeadset && config.carAsMedia) connectedCar() else null
-        if (car != null) {
+        if (playAsMedia(config, bluetoothCar = car != null)) {
             if (callMode || stream != AudioOutputStream.Media) {
                 leaveCallMode()
-                Log.i(TAG, "voice played as media through ${car.productName}, phone microphone")
+                val through = if (config.carProjection) "Android Auto" else car?.productName
+                Log.i(TAG, "voice played as media through $through, phone microphone")
             }
             setStream(AudioOutputStream.Media)
             return
@@ -149,12 +160,19 @@ internal class AudioRouting(private val context: Context) {
         leaveCallMode()
     }
 
-    private companion object {
-        const val TAG = "MvRouting"
-        val BLUETOOTH = setOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET)
-        val BLUETOOTH_MEDIA = setOf(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_SPEAKER)
-        val WIRED = setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_USB_HEADSET)
-        val CAR_CLASSES = setOf(
+    internal companion object {
+        /**
+         * Whether a car is in play and voice should go out as media rather than as a call: a car's
+         * Bluetooth ([bluetoothCar], only looked for when headsets are allowed) or Android Auto.
+         */
+        fun playAsMedia(config: AudioConfig, bluetoothCar: Boolean): Boolean =
+            config.carAsMedia && (config.carProjection || (config.bluetoothHeadset && bluetoothCar))
+
+        private const val TAG = "MvRouting"
+        private val BLUETOOTH = setOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET)
+        private val BLUETOOTH_MEDIA = setOf(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_SPEAKER)
+        private val WIRED = setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_USB_HEADSET)
+        private val CAR_CLASSES = setOf(
             BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO,
             BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE,
         )

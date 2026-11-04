@@ -20,6 +20,13 @@ enum class VideoResolution(val width: Int, val height: Int, val label: String) {
 /** When the app stops the screen sleeping while it is in front. */
 enum class KeepScreenAwake { Off, WhileVideo, WhileOpen }
 
+/**
+ * Which microphone to use in a car (Bluetooth or Android Auto). Android only lets an app record
+ * from the car's microphone in call mode, so the car shows a call while it does; the phone's
+ * microphone lets voice play as media instead.
+ */
+enum class CarMicrophone { Car, Phone }
+
 /** Size of the on-screen push-to-talk button. */
 enum class PttButtonSize(val heightDp: Int) { Small(56), Medium(88), Large(140) }
 
@@ -61,7 +68,7 @@ data class AppSettings(
     val echoCancellation: EchoCancellation = EchoCancellation.Off,
     val outputStream: AudioOutputStream = AudioOutputStream.VoiceCall,
     val bluetoothHeadset: Boolean = true,
-    val carAsMedia: Boolean = true,
+    val carMicrophone: CarMicrophone = CarMicrophone.Car,
 
     // Appearance
     val themeMode: ThemeMode = ThemeMode.System,
@@ -124,7 +131,7 @@ data class AppSettings(
         echoCancellation = echoCancellation,
         outputStream = outputStream,
         bluetoothHeadset = bluetoothHeadset,
-        carAsMedia = carAsMedia,
+        carAsMedia = carMicrophone == CarMicrophone.Phone,
         halfDuplex = halfDuplex,
         pushToTalkToggles = pttToggle,
     )

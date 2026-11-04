@@ -102,6 +102,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.service)
     implementation(libs.androidx.lifecycle.process)
+    implementation(libs.androidx.car.app)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore)
     implementation(libs.androidx.room.runtime)

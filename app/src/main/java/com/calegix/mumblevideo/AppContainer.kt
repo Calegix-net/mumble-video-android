@@ -23,6 +23,7 @@ import com.calegix.mumblevideo.service.ConnectionService
 import com.calegix.mumblevideo.service.MessageNotifier
 import com.calegix.mumblevideo.service.VoiceFeedback
 import com.calegix.mumblevideo.session.SessionController
+import com.calegix.mumblevideo.session.carProjection
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +74,7 @@ class AppContainer(context: Context) {
         onSessionStarting = { ConnectionService.start(appContext) },
         autoCertificate = !simulated,
         authorizeScreenCapture = { code, data -> (core as? NativeMumbleCore)?.provideScreenCapture(code, data) },
+        carProjection = carProjection(appContext),
     )
 
     init {

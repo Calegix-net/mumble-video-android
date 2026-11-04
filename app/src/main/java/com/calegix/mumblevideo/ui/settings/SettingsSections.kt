@@ -51,6 +51,7 @@ import com.calegix.mumblevideo.core.EchoCancellation
 import com.calegix.mumblevideo.core.VideoCodec
 import com.calegix.mumblevideo.core.VoiceInputMode
 import com.calegix.mumblevideo.data.settings.AppSettings
+import com.calegix.mumblevideo.data.settings.CarMicrophone
 import com.calegix.mumblevideo.data.settings.KeepScreenAwake
 import com.calegix.mumblevideo.data.settings.PttButtonSize
 import com.calegix.mumblevideo.data.settings.ThemeMode
@@ -242,11 +243,15 @@ fun AudioSettings(
             { v -> viewModel.update { it.copy(bluetoothHeadset = v) } },
             summary = "Route voice through a connected Bluetooth headset",
         )
-        SwitchPreference(
-            "Car stereo as media",
-            s.carAsMedia,
-            { v -> viewModel.update { it.copy(carAsMedia = v) } },
-            summary = "In the car, play like music and use the phone's microphone instead of a hands-free call",
+        ListPreference(
+            "Microphone in the car",
+            listOf(
+                CarMicrophone.Car to "Car's microphone (the car shows a call)",
+                CarMicrophone.Phone to "Phone's microphone (plays like music, no call screen)",
+            ),
+            s.carMicrophone,
+            { v -> viewModel.update { it.copy(carMicrophone = v) } },
+            summary = "Bluetooth or Android Auto. Android only gives apps the car's microphone during a call",
         )
     }
     if (capturingKey) {
