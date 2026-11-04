@@ -26,7 +26,16 @@ include(NativeDeps.cmake)
 list(APPEND CMAKE_FIND_ROOT_PATH "${MV_DEPS_PREFIX}")
 set(OPENSSL_ROOT_DIR "${MV_DEPS_PREFIX}")
 set(OPENSSL_USE_STATIC_LIBS ON)
+# FindOpenSSL asks pkg-config what a static libcrypto links against. Left alone, pkg-config answers
+# for the build machine's OpenSSL (Ubuntu 26.04's adds jitterentropy and zstd, which Android lacks),
+# so point it at the .pc files of the libcrypto built above, for this configure only.
+set(_mv_pkg_config_libdir "$ENV{PKG_CONFIG_LIBDIR}")
+set(_mv_pkg_config_path "$ENV{PKG_CONFIG_PATH}")
+set(ENV{PKG_CONFIG_LIBDIR} "${MV_DEPS_PREFIX}/lib/pkgconfig")
+set(ENV{PKG_CONFIG_PATH} "")
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+set(ENV{PKG_CONFIG_LIBDIR} "${_mv_pkg_config_libdir}")
+set(ENV{PKG_CONFIG_PATH} "${_mv_pkg_config_path}")
 find_package(Protobuf CONFIG REQUIRED)
 
 set(MUMBLE_CORE_PROTOBUF_LITE ON)
