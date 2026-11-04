@@ -66,7 +66,11 @@ class CameraConfirmScreenshotTest {
         themed {
             Box(Modifier.padding(12.dp)) {
                 OwnVideoControls(
-                    VideoUiState(supported = true, local = LocalVideoState(camera = stream), cameraFacing = CameraFacing.Back),
+                    VideoUiState(
+                        supported = true,
+                        local = LocalVideoState(camera = stream),
+                        cameraFacing = CameraFacing.Back,
+                    ),
                     onToggleCamera = {},
                     onSwitchCamera = {},
                     onStopScreen = {},
