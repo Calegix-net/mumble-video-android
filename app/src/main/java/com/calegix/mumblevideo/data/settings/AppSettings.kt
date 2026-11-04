@@ -86,6 +86,8 @@ data class AppSettings(
     val autoSubscribe: Boolean = true,
     val dataSaver: Boolean = false,
     val shareDeviceAudio: Boolean = true,
+    /** Ask "Start front camera?" before the camera goes live. */
+    val confirmCameraStart: Boolean = true,
 
     // Notifications
     val notifyMessages: Boolean = true,
